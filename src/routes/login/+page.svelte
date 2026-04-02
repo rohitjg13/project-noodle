@@ -46,7 +46,7 @@
 		</button>
 
 		<!-- footer -->
-		<p class="text-[10px] tracking-[0.15em] uppercase" style="color: var(--border);">
+		<p class="text-[10px] tracking-[0.15em] uppercase" style="color: var(--muted);">
 			sign in to continue
 		</p>
 	</div>

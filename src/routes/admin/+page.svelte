@@ -23,7 +23,7 @@
 		>
 			noodle
 		</a>
-		<span class="text-[10px] uppercase tracking-[0.15em]" style="color: var(--border);">
+		<span class="text-[10px] uppercase tracking-[0.15em]" style="color: var(--muted);">
 			/ admin
 		</span>
 	</header>
@@ -48,7 +48,7 @@
 		<!-- Assign CR -->
 		<section class="flex flex-col gap-6">
 			<div class="flex items-center justify-between">
-				<h2 class="text-[10px] uppercase tracking-[0.2em]" style="color: var(--border);">class representatives</h2>
+				<h2 class="text-[10px] uppercase tracking-[0.2em]" style="color: var(--muted);">class representatives</h2>
 				<button
 					onclick={() => { showAssignCR = !showAssignCR; selectedBatches = new Set(); }}
 					class="cursor-pointer border-none bg-transparent text-[10px] uppercase tracking-[0.15em] transition-colors duration-200"
@@ -83,11 +83,11 @@
 
 					<div class="flex flex-col gap-3">
 						<span class="text-[10px] uppercase tracking-[0.15em]" style="color: var(--muted);">
-							batches <span style="color: var(--border);">({data.batches.length} loaded)</span>
+							batches <span style="color: var(--muted);">({data.batches.length} loaded)</span>
 						</span>
 
 						{#if data.batches.length === 0}
-							<p class="text-[11px]" style="color: var(--border);">no batches in timetable file</p>
+							<p class="text-[11px]" style="color: var(--muted);">no batches in timetable file</p>
 						{:else}
 							<div
 								class="grid gap-x-4 gap-y-2 border p-4"
@@ -120,7 +120,7 @@
 									</label>
 								{/each}
 							</div>
-							<p class="text-[10px]" style="color: var(--border);">{selectedBatches.size} selected</p>
+							<p class="text-[10px]" style="color: var(--muted);">{selectedBatches.size} selected</p>
 						{/if}
 					</div>
 
@@ -139,7 +139,7 @@
 
 			<!-- CR list grouped by user -->
 			{#if data.crs.length === 0}
-				<p class="text-xs tracking-wide" style="color: var(--border);">no crs assigned yet</p>
+				<p class="text-xs tracking-wide" style="color: var(--muted);">no crs assigned yet</p>
 			{:else}
 				<div class="flex flex-col gap-3">
 					{#each data.crs as cr}
@@ -150,7 +150,7 @@
 								{#each cr.batches as b}
 									<span
 										class="flex items-center gap-1.5 border px-2 py-1 text-[10px] uppercase tracking-[0.1em]"
-										style="border-color: var(--border); color: var(--border);"
+										style="border-color: var(--border); color: var(--muted);"
 									>
 										{b.name}
 										<form method="POST" action="?/removeCr" use:enhance class="inline">
@@ -159,7 +159,7 @@
 											<button
 												type="submit"
 												class="cursor-pointer border-none bg-transparent text-sm leading-none transition-colors duration-200"
-												style="color: var(--border);"
+												style="color: var(--muted);"
 												onmouseenter={(e) => { (e.currentTarget as HTMLElement).style.color = 'var(--accent)'; }}
 												onmouseleave={(e) => { (e.currentTarget as HTMLElement).style.color = 'var(--border)'; }}
 												aria-label="remove {b.name}"

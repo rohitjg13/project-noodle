@@ -2,9 +2,9 @@ import { json } from '@sveltejs/kit';
 import type { RequestHandler } from './$types';
 import { db } from '$lib/server/db';
 import { scheduleBlock } from '$lib/server/db/schema';
-import { eq, and } from 'drizzle-orm';
+import { eq, and, isNull, or } from 'drizzle-orm';
 
-// GET /api/cr/schedule — returns all overrides (keyed by courseCode+component globally)
+// GET /api/cr/schedule — returns all overrides (keyed by courseCode+component+originalDay globally)
 export const GET: RequestHandler = async ({ locals }) => {
 	if (!locals.user) return json({ error: 'Unauthorized' }, { status: 401 });
 	const blocks = await db.select().from(scheduleBlock);
@@ -12,7 +12,7 @@ export const GET: RequestHandler = async ({ locals }) => {
 };
 
 // POST /api/cr/schedule — upsert a block override
-// Body: { courseCode, component, batch, day, startTime, endTime, courseName, faculty, room }
+// Body: { courseCode, component, originalDay, batch, day, startTime, endTime, courseName, faculty, room }
 export const POST: RequestHandler = async ({ locals, request }) => {
 	if (!locals.user) return json({ error: 'Unauthorized' }, { status: 401 });
 	if (locals.user.role !== 'cr' && locals.user.role !== 'super_admin') {
@@ -20,22 +20,27 @@ export const POST: RequestHandler = async ({ locals, request }) => {
 	}
 
 	const body = await request.json();
-	const { courseCode, component, batch, day, startTime, endTime, courseName, faculty, room } = body;
+	const { courseCode, component, originalDay, batch, day, startTime, endTime, courseName, faculty, room } = body;
 
-	if (!courseCode || !batch || !day || !startTime || !endTime) {
+	if (!courseCode || !batch || !day || !startTime || !endTime || !originalDay) {
 		return json({ error: 'Missing required fields' }, { status: 400 });
 	}
 
-	// Key is courseCode+component only — batch-independent, syncs across all CRs
+	// Key is courseCode+component+originalDay — each day-slot is independently overridable
+	// Handle NULL vs empty string for component column
+	const comp = component ?? '';
+	const componentCondition = comp
+		? eq(scheduleBlock.component, comp)
+		: or(eq(scheduleBlock.component, ''), isNull(scheduleBlock.component));
+
+	const origDayCondition = originalDay
+		? eq(scheduleBlock.originalDay, originalDay)
+		: or(eq(scheduleBlock.originalDay, ''), isNull(scheduleBlock.originalDay));
+
 	const existing = await db
 		.select({ id: scheduleBlock.id })
 		.from(scheduleBlock)
-		.where(
-			and(
-				eq(scheduleBlock.courseCode, courseCode),
-				eq(scheduleBlock.component, component ?? '')
-			)
-		)
+		.where(and(eq(scheduleBlock.courseCode, courseCode), componentCondition, origDayCondition))
 		.limit(1);
 
 	if (existing.length > 0) {
@@ -47,9 +52,10 @@ export const POST: RequestHandler = async ({ locals, request }) => {
 		await db.insert(scheduleBlock).values({
 			courseCode,
 			courseName: courseName ?? courseCode,
-			component: component ?? '',
+			component: comp,
 			faculty: faculty ?? '',
 			room: room ?? '',
+			originalDay,
 			day,
 			startTime,
 			endTime,
@@ -58,5 +64,15 @@ export const POST: RequestHandler = async ({ locals, request }) => {
 		});
 	}
 
+	return json({ success: true });
+};
+
+// DELETE /api/cr/schedule — clear all overrides (reset to XLSX originals)
+export const DELETE: RequestHandler = async ({ locals }) => {
+	if (!locals.user) return json({ error: 'Unauthorized' }, { status: 401 });
+	if (locals.user.role !== 'cr' && locals.user.role !== 'super_admin') {
+		return json({ error: 'Forbidden' }, { status: 403 });
+	}
+	await db.delete(scheduleBlock);
 	return json({ success: true });
 };

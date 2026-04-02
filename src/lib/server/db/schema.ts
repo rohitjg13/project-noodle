@@ -31,6 +31,7 @@ export const scheduleBlock = pgTable('schedule_block', {
 	component: text('component'),
 	faculty: text('faculty'),
 	room: text('room'),
+	originalDay: text('original_day'),
 	day: text('day').notNull(),
 	startTime: text('start_time').notNull(),
 	endTime: text('end_time').notNull(),
