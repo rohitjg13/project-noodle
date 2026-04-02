@@ -269,7 +269,7 @@
 		dragCourse = null;
 	}
 
-	async function signOut() { await authClient.signOut(); window.location.href = '/login'; }
+	function signOut() { window.location.href = '/auth/signout'; }
 
 	const tColors: Record<string, string> = { green: '#22c55e', yellow: '#eab308', red: '#ef4444' };
 	const DAY_LIST = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
