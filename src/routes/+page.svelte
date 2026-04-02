@@ -39,10 +39,18 @@
 
 	// Timetable state
 	let dragCourse = $state<Course | null>(null);
-	let dragOffsetY = $state(0); // Y offset within block where user grabbed it
+	let dragOffsetY = $state(0);
 	let dragOverSlot = $state<{ day: string; startMin: number } | null>(null);
+	// Override key: `courseCode|component` (batch-independent — one CR move syncs to all)
 	let scheduleOverrides = $state<Map<string, { day: string; startTime: string; endTime: string }>>(new Map());
-	let syncStatus = $state<'idle' | 'saving' | 'saved' | 'error'>('idle');
+	// XLSX original positions before any overrides
+	let xlsxOriginals = $state<Map<string, { day: string; startTime: string; endTime: string }>>(new Map());
+	let showOriginals = $state(false);
+	let syncStatus = $state<'idle' | 'saving' | 'saved' | 'error' | 'polling'>('idle');
+	let lastSyncedAt = $state(0);
+	// Time range extension (in whole hours, relative to auto-detected range)
+	let extraHoursBefore = $state(0);
+	let extraHoursAfter = $state(1); // start with 1hr extra at the end
 	let toast = $state('');
 	let toastTimeout: ReturnType<typeof setTimeout>;
 
@@ -173,14 +181,11 @@
 		for (const c of courses) {
 			if (!c.day || !c.startTime || !c.endTime) continue;
 			if (!matchesCRBatch(c.major)) continue;
-			// Dedup by courseCode + component (same lecture/lab appears once per batch group)
-			const dedupKey = `${c.courseCode}|${c.component}`;
+			const dedupKey = `${c.courseCode}|${c.component ?? ''}`;
 			if (seen.has(dedupKey)) continue;
 			seen.add(dedupKey);
-			// Apply DB override if one exists for this course+batch
-			const batchName = (c.major || '').toUpperCase().split(/[\s,]+/).find((m) => crBatchNames.includes(m)) ?? c.major;
-			const overrideKey = `${c.courseCode}|${c.component ?? ''}|${batchName}`;
-			const override = scheduleOverrides.get(overrideKey);
+			// Override key is courseCode|component only — batch-independent
+			const override = scheduleOverrides.get(dedupKey);
 			if (override) {
 				result.push({ ...c, day: override.day, startTime: override.startTime, endTime: override.endTime });
 			} else {
@@ -188,6 +193,39 @@
 			}
 		}
 		return result;
+	});
+
+	// Capture XLSX original positions once courses load
+	$effect(() => {
+		if (courses.length > 0 && xlsxOriginals.size === 0) {
+			const map = new Map<string, { day: string; startTime: string; endTime: string }>();
+			for (const c of courses) {
+				if (!c.day || !c.startTime || !c.endTime) continue;
+				const key = `${c.courseCode}|${c.component ?? ''}`;
+				if (!map.has(key)) map.set(key, { day: c.day, startTime: c.startTime, endTime: c.endTime });
+			}
+			xlsxOriginals = map;
+		}
+	});
+
+	// Ghost blocks: original positions of moved courses
+	type GhostBlock = { courseCode: string; courseName: string; day: string; startMin: number; endMin: number };
+	let ghostBlocks = $derived(() => {
+		if (!showOriginals) return [] as GhostBlock[];
+		const blocks: GhostBlock[] = [];
+		for (const [key, override] of scheduleOverrides) {
+			const orig = xlsxOriginals.get(key);
+			if (!orig) continue;
+			if (orig.day === override.day && orig.startTime === override.startTime) continue; // not moved
+			const days = parseDays(orig.day);
+			const s = timeToMinutes(orig.startTime);
+			const e = timeToMinutes(orig.endTime);
+			if (s >= e) continue;
+			const courseCode = key.split('|')[0];
+			const matchCourse = courses.find((c) => c.courseCode === courseCode);
+			for (const d of days) blocks.push({ courseCode, courseName: matchCourse?.courseName ?? courseCode, day: d, startMin: s, endMin: e });
+		}
+		return blocks;
 	});
 
 	// UWE overlay system for CR timetable
@@ -259,8 +297,11 @@
 	let maxT = $derived(Math.max(...(calendarBlocks().map((b) => b.endMin).length ? calendarBlocks().map((b) => b.endMin) : [1080])));
 	let rMin = $derived(Math.floor(minT / 60) * 60);
 	let rMax = $derived(Math.ceil(maxT / 60) * 60);
-	let totalMin = $derived(rMax - rMin);
-	let timeLabels = $derived(Array.from({ length: Math.floor(totalMin / 60) + 1 }, (_, i) => ({ mins: rMin + i * 60, label: minutesToTime(rMin + i * 60) })));
+	// Displayed range with user-controlled extension
+	let tDispMin = $derived(Math.max(0, rMin - extraHoursBefore * 60));
+	let tDispMax = $derived(Math.min(1440, rMax + extraHoursAfter * 60));
+	let totalMin = $derived(tDispMax - tDispMin);
+	let timeLabels = $derived(Array.from({ length: Math.floor(totalMin / 60) + 1 }, (_, i) => ({ mins: tDispMin + i * 60, label: minutesToTime(tDispMin + i * 60) })));
 
 	function isConstrained(day: string, startMin: number, endMin: number): string | null {
 		for (const c of constraints) {
@@ -287,22 +328,35 @@
 				constraints = c.constraints ?? [];
 			}).catch(() => {}).finally(() => (loadingCR = false));
 
-			// Load saved schedule overrides for this CR's batches
-			const batches = (data.crBatches ?? []).map((b: { batch: { name: string } }) => b.batch.name);
-			if (batches.length) {
-				fetch(`/api/cr/schedule?batches=${batches.join(',')}`)
-					.then((r) => r.json())
-					.then((d) => {
-						const map = new Map<string, { day: string; startTime: string; endTime: string }>();
-						for (const block of (d.blocks ?? [])) {
-							const key = `${block.courseCode}|${block.component ?? ''}|${block.batch}`;
-							map.set(key, { day: block.day, startTime: block.startTime, endTime: block.endTime });
-						}
-						scheduleOverrides = map;
-					})
-					.catch(() => {});
-			}
+			// Load saved schedule overrides (batch-independent key: courseCode|component)
+			fetchOverrides();
 		}
+	});
+
+	function buildOverrideMap(blocks: { courseCode: string; component?: string; day: string; startTime: string; endTime: string }[]) {
+		const map = new Map<string, { day: string; startTime: string; endTime: string }>();
+		for (const b of blocks) map.set(`${b.courseCode}|${b.component ?? ''}`, { day: b.day, startTime: b.startTime, endTime: b.endTime });
+		return map;
+	}
+
+	async function fetchOverrides() {
+		try {
+			const r = await fetch('/api/cr/schedule');
+			if (!r.ok) return;
+			const d = await r.json();
+			scheduleOverrides = buildOverrideMap(d.blocks ?? []);
+			lastSyncedAt = Date.now();
+		} catch { /* ignore */ }
+	}
+
+	// Poll for live sync when timetable tab is open
+	$effect(() => {
+		if (activeTab !== 'timetable' || !canManage) return;
+		const interval = setInterval(async () => {
+			if (syncStatus === 'saving') return; // don't poll while saving
+			await fetchOverrides();
+		}, 5000);
+		return () => clearInterval(interval);
 	});
 
 	// Student actions
@@ -398,11 +452,11 @@
 			courses = [...courses];
 		}
 
-		// Persist to DB — find which batch this course belongs to
+		// Persist to DB — key by courseCode|component only (syncs across all CRs)
 		const course = dragCourse;
 		dragCourse = null;
+		const overrideKey = `${course.courseCode}|${course.component ?? ''}`;
 
-		const batchName = (course.major || '').toUpperCase().split(/[\s,]+/).find((m) => crBatchNames.includes(m)) ?? course.major;
 		syncStatus = 'saving';
 		try {
 			const res = await fetch('/api/cr/schedule', {
@@ -411,7 +465,7 @@
 				body: JSON.stringify({
 					courseCode: course.courseCode,
 					component: course.component ?? '',
-					batch: batchName,
+					batch: (course.major || '').toUpperCase().split(/[\s,]+/).find((m) => crBatchNames.includes(m)) ?? course.major,
 					day,
 					startTime: newStart,
 					endTime: newEnd,
@@ -421,11 +475,10 @@
 				})
 			});
 			if (res.ok) {
-				// Update local overrides map
-				const key = `${course.courseCode}|${course.component ?? ''}|${batchName}`;
-				scheduleOverrides = new Map(scheduleOverrides).set(key, { day, startTime: newStart, endTime: newEnd });
+				scheduleOverrides = new Map(scheduleOverrides).set(overrideKey, { day, startTime: newStart, endTime: newEnd });
+				lastSyncedAt = Date.now();
 				syncStatus = 'saved';
-				setTimeout(() => (syncStatus = 'idle'), 2000);
+				setTimeout(() => (syncStatus = 'idle'), 2500);
 			} else {
 				syncStatus = 'error';
 				setTimeout(() => (syncStatus = 'idle'), 3000);
@@ -767,20 +820,56 @@
 		<!-- ==================== CR: TIMETABLE ==================== -->
 		{:else if activeTab === 'timetable'}
 			<div class="flex flex-col gap-5">
-				<div class="flex items-start justify-between">
-					<div>
+				<div class="flex items-start justify-between gap-4">
+					<div class="min-w-0">
 						<h2 class="text-lg" style="font-family: var(--font-serif); color: var(--accent);">weekly schedule</h2>
 						<p class="text-[9px] uppercase tracking-[0.1em]" style="color: var(--muted);">
-							drag to reschedule
 							{#if crBatchNames.length}
-								— {crBatchNames.join(', ')}
+								{crBatchNames.join(', ')} ·
 							{/if}
-							<span style="color: var(--border);">({crBatchCourses().length} courses)</span>
+							{crBatchCourses().length} courses
 						</p>
 					</div>
-					<span class="text-[9px] uppercase tracking-[0.12em] transition-colors duration-200" style="color: {syncStatus === 'saving' ? 'var(--muted)' : syncStatus === 'saved' ? '#4e4' : syncStatus === 'error' ? '#e44' : 'var(--border)'};">
-						{syncStatus === 'saving' ? 'saving...' : syncStatus === 'saved' ? 'synced' : syncStatus === 'error' ? 'sync failed' : scheduleOverrides.size ? `${scheduleOverrides.size} overrides` : ''}
-					</span>
+					<div class="flex shrink-0 items-center gap-3">
+						<!-- Originals toggle -->
+						{#if scheduleOverrides.size > 0}
+							<button
+								onclick={() => showOriginals = !showOriginals}
+								class="cursor-pointer border px-2.5 py-1 text-[9px] uppercase tracking-[0.1em] transition-all duration-150"
+								style="border-color: {showOriginals ? 'var(--muted)' : 'var(--border)'}; color: {showOriginals ? 'var(--fg)' : 'var(--muted)'}; background: transparent;"
+							>{showOriginals ? 'hide original' : 'show original'}</button>
+						{/if}
+						<!-- Sync status -->
+						<span class="text-[9px] uppercase tracking-[0.12em]" style="color: {syncStatus === 'saving' ? 'var(--muted)' : syncStatus === 'saved' ? '#4e4' : syncStatus === 'error' ? '#e44' : 'var(--border)'};">
+							{#if syncStatus === 'saving'}saving…{:else if syncStatus === 'saved'}synced ✓{:else if syncStatus === 'error'}sync failed{:else if lastSyncedAt > 0}live{/if}
+						</span>
+					</div>
+				</div>
+				<!-- Time range controls -->
+				<div class="flex items-center gap-3">
+					<button onclick={() => extraHoursBefore = Math.min(extraHoursBefore + 1, Math.floor(tDispMin / 60))}
+						class="cursor-pointer border px-2.5 py-1 text-[9px] tracking-wider transition-all duration-150"
+						style="border-color: var(--border); color: var(--muted); background: transparent;"
+						onmouseenter={(e) => { e.currentTarget.style.color = 'var(--accent)'; e.currentTarget.style.borderColor = 'var(--muted)'; }}
+						onmouseleave={(e) => { e.currentTarget.style.color = 'var(--muted)'; e.currentTarget.style.borderColor = 'var(--border)'; }}
+						disabled={tDispMin <= 0}
+					>↑ earlier</button>
+					<span class="text-[9px]" style="color: var(--border);">{minutesToTime(tDispMin)} — {minutesToTime(tDispMax)}</span>
+					<button onclick={() => extraHoursAfter = Math.min(extraHoursAfter + 1, Math.floor((1440 - tDispMax) / 60))}
+						class="cursor-pointer border px-2.5 py-1 text-[9px] tracking-wider transition-all duration-150"
+						style="border-color: var(--border); color: var(--muted); background: transparent;"
+						onmouseenter={(e) => { e.currentTarget.style.color = 'var(--accent)'; e.currentTarget.style.borderColor = 'var(--muted)'; }}
+						onmouseleave={(e) => { e.currentTarget.style.color = 'var(--muted)'; e.currentTarget.style.borderColor = 'var(--border)'; }}
+						disabled={tDispMax >= 1440}
+					>↓ later</button>
+					{#if extraHoursBefore > 0 || extraHoursAfter > 1}
+						<button onclick={() => { extraHoursBefore = 0; extraHoursAfter = 1; }}
+							class="cursor-pointer border-none bg-transparent text-[9px] tracking-wider transition-colors duration-150"
+							style="color: var(--border);"
+							onmouseenter={(e) => { e.currentTarget.style.color = 'var(--muted)'; }}
+							onmouseleave={(e) => { e.currentTarget.style.color = 'var(--border)'; }}
+						>reset</button>
+					{/if}
 				</div>
 
 				{#if !crBatchNames.length}
@@ -835,11 +924,22 @@
 														{/if}
 													</div>
 												{/each}
-												{#if dragOverSlot?.day === day && dragOverSlot?.startMin >= hStart && dragOverSlot?.startMin < hEnd}
-													{@const dropY = ((dragOverSlot.startMin - hStart) / 60) * CELL_H}
-													<div class="absolute left-0.5 right-0.5" style="top: {dropY}px; height: 2px; background: var(--accent); z-index: 3;"></div>
-													<span class="absolute text-[6px] z-[4]" style="top: {dropY - 8}px; right: 2px; color: var(--accent);">{minutesToTime(dragOverSlot.startMin)}</span>
-												{/if}
+											<!-- Ghost blocks (original positions of moved courses) -->
+											{#if showOriginals}
+												{#each ghostBlocks().filter((g) => g.day === day && g.startMin >= hStart && g.startMin < hEnd) as ghost}
+													{@const gTop = ((ghost.startMin - hStart) / 60) * CELL_H}
+													{@const gH = Math.max(14, ((ghost.endMin - ghost.startMin) / 60) * CELL_H)}
+													<div class="absolute left-0.5 right-0.5 overflow-hidden px-1 py-0.5 pointer-events-none"
+														style="top: {gTop}px; height: {gH}px; border: 1px dashed var(--muted); opacity: 0.4; z-index: 1;">
+														<div class="text-[7px] truncate" style="color: var(--muted);">{ghost.courseCode.split('-')[0]}</div>
+													</div>
+												{/each}
+											{/if}
+											{#if dragOverSlot?.day === day && dragOverSlot?.startMin >= hStart && dragOverSlot?.startMin < hEnd}
+												{@const dropY = ((dragOverSlot.startMin - hStart) / 60) * CELL_H}
+												<div class="absolute left-0.5 right-0.5" style="top: {dropY}px; height: 2px; background: var(--accent); z-index: 3;"></div>
+												<span class="absolute text-[6px] z-[4]" style="top: {dropY - 8}px; right: 2px; color: var(--accent);">{minutesToTime(dragOverSlot.startMin)}</span>
+											{/if}
 											</div>
 										{/each}
 									{/if}

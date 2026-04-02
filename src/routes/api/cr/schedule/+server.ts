@@ -2,23 +2,12 @@ import { json } from '@sveltejs/kit';
 import type { RequestHandler } from './$types';
 import { db } from '$lib/server/db';
 import { scheduleBlock } from '$lib/server/db/schema';
-import { eq, and, inArray } from 'drizzle-orm';
+import { eq, and } from 'drizzle-orm';
 
-// GET /api/cr/schedule?batches=ELC21,ELC22
-export const GET: RequestHandler = async ({ locals, url }) => {
+// GET /api/cr/schedule — returns all overrides (keyed by courseCode+component globally)
+export const GET: RequestHandler = async ({ locals }) => {
 	if (!locals.user) return json({ error: 'Unauthorized' }, { status: 401 });
-
-	const batchParam = url.searchParams.get('batches');
-	if (!batchParam) return json({ blocks: [] });
-
-	const batches = batchParam.split(',').map((b) => b.trim()).filter(Boolean);
-	if (!batches.length) return json({ blocks: [] });
-
-	const blocks = await db
-		.select()
-		.from(scheduleBlock)
-		.where(inArray(scheduleBlock.batch, batches));
-
+	const blocks = await db.select().from(scheduleBlock);
 	return json({ blocks });
 };
 
@@ -37,15 +26,14 @@ export const POST: RequestHandler = async ({ locals, request }) => {
 		return json({ error: 'Missing required fields' }, { status: 400 });
 	}
 
-	// Check for existing override for this courseCode+component+batch
+	// Key is courseCode+component only — batch-independent, syncs across all CRs
 	const existing = await db
 		.select({ id: scheduleBlock.id })
 		.from(scheduleBlock)
 		.where(
 			and(
 				eq(scheduleBlock.courseCode, courseCode),
-				eq(scheduleBlock.component, component ?? ''),
-				eq(scheduleBlock.batch, batch)
+				eq(scheduleBlock.component, component ?? '')
 			)
 		)
 		.limit(1);
