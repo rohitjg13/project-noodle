@@ -10,23 +10,28 @@
 	const canManage = isCR || isSuperAdmin;
 
 	let viewAsStudent = $state(!canManage);
-	let activeTab = $state<'preferences' | 'mytimetable' | 'demand' | 'timetable' | 'settings'>('preferences');
+	let activeTab = $state<'preferences' | 'mytimetable' | 'demand' | 'timetable' | 'settings'>(canManage ? 'demand' : 'preferences');
 
-	// Batch selection (Scooby-style multi-batch with autocomplete)
-	let batchInputs = $state<string[]>(['']);
-	let batchSuggestions = $state<string[][]>([[]]);
+	// Batch selection (shared between student profile + my timetable)
+	const savedBatch = data.preference?.batch ?? '';
+	const savedBatchList = savedBatch ? savedBatch.split(',').map((b: string) => b.trim()).filter(Boolean) : [];
+	let batchInputs = $state<string[]>(savedBatchList.length ? savedBatchList : ['']);
+	let batchSuggestions = $state<string[][]>(savedBatchList.length ? savedBatchList.map(() => []) : [[]]);
 	let activeSuggestionIdx = $state(-1);
-	let selectedBatches = $state<string[]>([]);
+	let selectedBatches = $state<string[]>(savedBatchList);
 
 	// Student preference state
 	let courses = $state<Course[]>([]);
 	let loadingCourses = $state(true);
+	let studentBatch = $state(savedBatch); // persisted batch string from DB
+	let editingBatch = $state(!savedBatch); // show batch editor when no batch saved
 	let minor = $state(data.preference?.minor ?? '');
 	let uwePref1 = $state(data.preference?.uwePref1 ?? '');
 	let uwePref2 = $state(data.preference?.uwePref2 ?? '');
 	let uwePref3 = $state(data.preference?.uwePref3 ?? '');
 	let locked = $state(data.preference?.locked ?? false);
 	let submitting = $state(false);
+	let batchSubmitting = $state(false);
 	let prefError = $state('');
 	let prefSuccess = $state('');
 
@@ -161,18 +166,6 @@
 	let coreCourses = $derived(courses.filter((c) => !c.openAsUWE && c.day && c.startTime && c.endTime));
 	let uweCourses = $derived(courses.filter((c) => c.openAsUWE && c.day && c.startTime && c.endTime));
 
-	function getTrafficLight(courseCode: string): ConflictLevel {
-		const variants = uweCourses.filter((c) => c.courseCode.startsWith(courseCode));
-		if (!variants.length) return 'green';
-		let best: ConflictLevel = 'red';
-		for (const v of variants) {
-			const level = getConflictLevel(v, coreCourses);
-			if (level === 'green') return 'green';
-			if (level === 'yellow') best = 'yellow';
-		}
-		return best;
-	}
-
 	// CR batch names (all assigned batches)
 	let crBatchNames = $derived(
 		(data.crBatches ?? []).map((b: { batch: { name: string } }) => b.batch.name.toUpperCase())
@@ -184,6 +177,63 @@
 		const majors = major.toUpperCase().split(/[\s,]+/);
 		return crBatchNames.some((bn: string) => majors.some((m: string) => m === bn));
 	}
+
+	function getTrafficLight(courseCode: string): ConflictLevel {
+		// For CRs, check against their batch's timetable; for students, all core courses
+		const cores = canManage ? crBatchCourses() : coreCourses;
+		const variants = uweCourses.filter((c) => c.courseCode.startsWith(courseCode));
+		if (!variants.length) return 'green';
+		let best: ConflictLevel = 'red';
+		for (const v of variants) {
+			const level = getConflictLevel(v, cores);
+			if (level === 'green') return 'green';
+			if (level === 'yellow') best = 'yellow';
+		}
+		return best;
+	}
+
+	// Adjusted traffic light map — recomputes reactively when scheduleOverrides changes
+	// Uses overridden positions for both UWE and core courses to detect resolved conflicts
+	let adjustedConflictMap = $derived(() => {
+		const map = new Map<string, ConflictLevel>();
+		if (!canManage || scheduleOverrides.size === 0) return map;
+
+		// Build adjusted core courses (CR batch courses with overrides applied)
+		const adjustedCores: Course[] = [];
+		for (const c of crBatchCourses()) {
+			const origDays = parseDays(c.day || '');
+			for (const origDay of origDays) {
+				const override = scheduleOverrides.get(`${c.courseCode}|${c.component ?? ''}|${origDay}`);
+				if (override) adjustedCores.push({ ...c, day: override.day, startTime: override.startTime, endTime: override.endTime });
+				else adjustedCores.push({ ...c, day: origDay });
+			}
+		}
+
+		for (const item of demand) {
+			const orig = getTrafficLight(item.courseCode);
+			if (orig === 'green') continue; // already fine, skip
+			const variants = uweCourses.filter((c) => c.courseCode.startsWith(item.courseCode));
+			let best: ConflictLevel = 'red';
+			for (const v of variants) {
+				const origDays = parseDays(v.day || '');
+				if (!origDays.length || !v.startTime || !v.endTime) { best = 'green'; break; }
+				let variantLevel: ConflictLevel = 'green';
+				for (const origDay of origDays) {
+					const override = scheduleOverrides.get(`${v.courseCode}|${v.component ?? ''}|${origDay}`);
+					const synth = override
+						? { ...v, day: override.day, startTime: override.startTime, endTime: override.endTime }
+						: { ...v, day: origDay };
+					const slotLevel = getConflictLevel(synth, adjustedCores);
+					if (slotLevel === 'red') { variantLevel = 'red'; break; }
+					if (slotLevel === 'yellow') variantLevel = 'yellow';
+				}
+				if (variantLevel === 'green') { best = 'green'; break; }
+				if (variantLevel === 'yellow') best = 'yellow';
+			}
+			map.set(item.courseCode, best);
+		}
+		return map;
+	});
 
 	// Deduplicated batch courses (overrides applied per day-slot in calendarBlocks)
 	let crBatchCourses = $derived(() => {
@@ -366,9 +416,28 @@
 	});
 
 	// Student actions
+	async function saveBatch() {
+		const valid = batchInputs.map((b) => b.trim().toUpperCase()).filter(Boolean);
+		if (!valid.length) { prefError = 'Enter at least one batch code'; return; }
+		prefError = '';
+		batchSubmitting = true;
+		const batchStr = valid.join(',');
+		const res = await fetch('/api/student/preferences', {
+			method: 'POST',
+			headers: { 'Content-Type': 'application/json' },
+			body: JSON.stringify({ batch: batchStr, minor, uwePref1, uwePref2, uwePref3 })
+		});
+		if (!res.ok) { const d = await res.json(); prefError = d.error || 'Failed to save batch'; batchSubmitting = false; return; }
+		studentBatch = batchStr;
+		selectedBatches = valid;
+		editingBatch = false;
+		batchSubmitting = false;
+	}
+
 	async function submitPreferences() {
 		prefError = '';
 		prefSuccess = '';
+		if (!studentBatch) { prefError = 'Set your batch first'; return; }
 		if (!uwePref1) { prefError = 'At least your first UWE preference is required'; return; }
 		const choices = [uwePref1, uwePref2, uwePref3].filter(Boolean);
 		if (new Set(choices).size !== choices.length) { prefError = 'No duplicate UWE preferences'; return; }
@@ -377,7 +446,7 @@
 		const res = await fetch('/api/student/preferences', {
 			method: 'POST',
 			headers: { 'Content-Type': 'application/json' },
-			body: JSON.stringify({ minor, uwePref1, uwePref2, uwePref3 })
+			body: JSON.stringify({ batch: studentBatch, minor, uwePref1, uwePref2, uwePref3 })
 		});
 		if (!res.ok) { const d = await res.json(); prefError = d.error || 'Failed'; submitting = false; return; }
 		prefSuccess = 'preferences saved';
@@ -584,66 +653,159 @@
 								<span class="text-xs truncate" style="color: var(--fg);">{value}</span>
 							</div>
 						{/each}
-						{#if data.crBatch}
-							<div class="flex flex-col gap-0.5 border px-3 py-2.5" style="border-color: var(--border);">
-								<span class="text-[9px] uppercase tracking-[0.1em]" style="color: var(--muted);">batch</span>
-								<span class="text-xs" style="color: var(--fg);">{data.crBatch.name}</span>
-							</div>
-						{/if}
 					</div>
 				</div>
 
 				<div class="h-px" style="background: var(--border);"></div>
 
-				<!-- Preference form -->
-				<div class="flex flex-col gap-5">
+				<!-- Batch setup / editor -->
+				<div class="flex flex-col gap-4">
 					<div class="flex items-center justify-between">
-						<h2 class="text-lg" style="font-family: var(--font-serif); color: var(--accent);">course preferences</h2>
-						{#if locked}
-							<span class="border px-2.5 py-1 text-[9px] uppercase tracking-[0.12em]" style="border-color: var(--border); color: var(--muted);">locked</span>
+						<div>
+							<h2 class="text-lg" style="font-family: var(--font-serif); color: var(--accent);">your batch</h2>
+							{#if !studentBatch}<p class="text-[9px] uppercase tracking-[0.08em] mt-0.5" style="color: #e44;">required before submitting preferences</p>{/if}
+						</div>
+						{#if studentBatch && !editingBatch}
+							<button onclick={() => editingBatch = true}
+								class="cursor-pointer border-none bg-transparent text-[9px] uppercase tracking-[0.12em] transition-colors duration-150"
+								style="color: var(--muted);"
+								onmouseenter={(e) => { e.currentTarget.style.color = 'var(--accent)'; }}
+								onmouseleave={(e) => { e.currentTarget.style.color = 'var(--muted)'; }}
+							>edit</button>
 						{/if}
 					</div>
 
-					{#if loadingCourses}
-						<p class="text-xs animate-pulse" style="color: var(--muted);">loading courses...</p>
-					{:else}
-						<div class="flex flex-col gap-2">
-							<span class="text-[9px] uppercase tracking-[0.1em]" style="color: var(--muted);">minor (optional)</span>
-							<select bind:value={minor} disabled={locked}
-								class="border bg-transparent px-3 py-2.5 text-xs outline-none disabled:opacity-30"
-								style="border-color: var(--border); color: var(--fg); background: var(--bg);">
-								<option value="">— none —</option>
-								{#each minorPrograms as p}<option value={p}>{p}</option>{/each}
-							</select>
+					{#if !editingBatch && studentBatch}
+						<!-- Saved batch display -->
+						<div class="flex flex-wrap gap-1.5">
+							{#each studentBatch.split(',').map(b => b.trim()).filter(Boolean) as b}
+								<span class="border px-2.5 py-1 text-[9px] uppercase tracking-[0.1em]" style="border-color: var(--border); color: var(--fg);">{b}</span>
+							{/each}
 						</div>
-
-						{#each [{ l: 'uwe pref 1 (highest)', v: uwePref1, s: (x: string) => uwePref1 = x }, { l: 'uwe pref 2', v: uwePref2, s: (x: string) => uwePref2 = x }, { l: 'uwe pref 3 (lowest)', v: uwePref3, s: (x: string) => uwePref3 = x }] as pref}
-							<div class="flex flex-col gap-2">
-								<span class="text-[9px] uppercase tracking-[0.1em]" style="color: var(--muted);">{pref.l}</span>
-								<select value={pref.v} onchange={(e) => pref.s(e.currentTarget.value)} disabled={locked}
-									class="border bg-transparent px-3 py-2.5 text-xs outline-none disabled:opacity-30"
-									style="border-color: var(--border); color: var(--fg); background: var(--bg);">
-									<option value="">— select —</option>
-									{#each uweCourseOptions as c}<option value={c.courseCode.split('-')[0]}>{c.courseCode.split('-')[0]} — {c.courseName}</option>{/each}
-								</select>
+					{:else}
+						<!-- Batch input editor -->
+						<div class="flex flex-col gap-2">
+							{#each batchInputs as input, i}
+								<div class="relative flex gap-2">
+									<input
+										type="text"
+										bind:value={batchInputs[i]}
+										oninput={() => onBatchInput(i)}
+										onfocus={() => onBatchInput(i)}
+										onblur={() => setTimeout(() => { batchSuggestions[i] = []; batchSuggestions = [...batchSuggestions]; }, 150)}
+										placeholder="e.g. ELC21"
+										autocomplete="off"
+										class="flex-1 border bg-transparent px-3 py-2.5 text-xs uppercase outline-none transition-colors duration-200 focus:border-[var(--muted)]"
+										style="border-color: var(--border); color: var(--fg);"
+									/>
+									{#if batchInputs.length > 1}
+										<button onclick={() => removeBatchInput(i)}
+											class="cursor-pointer border-none bg-transparent px-2 text-xs transition-colors duration-200"
+											style="color: var(--muted);"
+											onmouseenter={(e) => { e.currentTarget.style.color = '#e44'; }}
+											onmouseleave={(e) => { e.currentTarget.style.color = 'var(--muted)'; }}
+										>&times;</button>
+									{/if}
+									{#if batchSuggestions[i]?.length}
+										<div class="absolute left-0 top-full z-10 mt-0.5 max-h-40 w-full overflow-y-auto border"
+											style="background: var(--surface); border-color: var(--border);">
+											{#each batchSuggestions[i] as suggestion}
+												<button
+													onmousedown={() => selectBatchSuggestion(i, suggestion)}
+													class="block w-full cursor-pointer border-none bg-transparent px-3 py-2 text-left text-[10px] uppercase tracking-[0.1em] transition-colors duration-100"
+													style="color: var(--muted);"
+													onmouseenter={(e) => { e.currentTarget.style.background = 'var(--border)'; e.currentTarget.style.color = 'var(--accent)'; }}
+													onmouseleave={(e) => { e.currentTarget.style.background = 'transparent'; e.currentTarget.style.color = 'var(--muted)'; }}
+												>{suggestion}</button>
+											{/each}
+										</div>
+									{/if}
+								</div>
+							{/each}
+							<div class="flex items-center gap-3 mt-1">
+								{#if batchInputs.length < 4}
+									<button onclick={addBatchInput}
+										class="cursor-pointer border-none bg-transparent text-[9px] uppercase tracking-[0.1em] transition-colors duration-150"
+										style="color: var(--muted);"
+										onmouseenter={(e) => { e.currentTarget.style.color = 'var(--accent)'; }}
+										onmouseleave={(e) => { e.currentTarget.style.color = 'var(--muted)'; }}
+									>+ add batch</button>
+								{/if}
+								<div class="flex-1"></div>
+								{#if studentBatch && editingBatch}
+									<button onclick={() => { editingBatch = false; batchInputs = studentBatch.split(',').map(b => b.trim()).filter(Boolean); batchSuggestions = batchInputs.map(() => []); }}
+										class="cursor-pointer border-none bg-transparent text-[9px] uppercase tracking-[0.12em] transition-colors duration-150"
+										style="color: var(--muted);"
+									>cancel</button>
+								{/if}
+								<button onclick={saveBatch} disabled={batchSubmitting}
+									class="cursor-pointer border px-4 py-2 text-[9px] uppercase tracking-[0.15em] transition-all duration-200 disabled:opacity-30"
+									style="border-color: var(--muted); color: var(--fg); background: transparent;"
+									onmouseenter={(e) => { e.currentTarget.style.borderColor = 'var(--accent)'; e.currentTarget.style.color = 'var(--accent)'; }}
+									onmouseleave={(e) => { e.currentTarget.style.borderColor = 'var(--muted)'; e.currentTarget.style.color = 'var(--fg)'; }}
+								>{batchSubmitting ? 'saving...' : 'save batch'}</button>
 							</div>
-						{/each}
-
-						{#if prefError}<p class="text-xs" style="color: #e44;">{prefError}</p>{/if}
-						{#if prefSuccess}<p class="text-xs" style="color: #4e4;">{prefSuccess}</p>{/if}
-
-						{#if !locked}
-							<button onclick={submitPreferences} disabled={submitting}
-								class="mt-1 cursor-pointer border px-5 py-3 text-[10px] uppercase tracking-[0.2em] transition-all duration-300 hover:tracking-[0.25em] disabled:opacity-30 disabled:cursor-wait"
-								style="background: transparent; border-color: var(--border); color: var(--muted);"
-								onmouseenter={(e) => { e.currentTarget.style.borderColor = 'var(--muted)'; e.currentTarget.style.color = 'var(--accent)'; }}
-								onmouseleave={(e) => { e.currentTarget.style.borderColor = 'var(--border)'; e.currentTarget.style.color = 'var(--muted)'; }}
-							>{submitting ? 'saving...' : data.preference ? 'update preferences' : 'submit preferences'}</button>
-						{:else}
-							<p class="text-[10px] uppercase tracking-[0.12em]" style="color: var(--muted);">editing is locked by your class rep</p>
-						{/if}
+						</div>
 					{/if}
 				</div>
+
+				<div class="h-px" style="background: var(--border);"></div>
+
+				<!-- Preference form — gated behind batch -->
+				{#if !studentBatch}
+					<div class="flex flex-col items-center gap-3 py-6" style="border: 1px dashed var(--border);">
+						<p class="text-xs" style="color: var(--muted);">set your batch above to unlock course preferences</p>
+					</div>
+				{:else}
+					<div class="flex flex-col gap-5">
+						<div class="flex items-center justify-between">
+							<h2 class="text-lg" style="font-family: var(--font-serif); color: var(--accent);">course preferences</h2>
+							{#if locked}
+								<span class="border px-2.5 py-1 text-[9px] uppercase tracking-[0.12em]" style="border-color: var(--border); color: var(--muted);">locked</span>
+							{/if}
+						</div>
+
+						{#if loadingCourses}
+							<p class="text-xs animate-pulse" style="color: var(--muted);">loading courses...</p>
+						{:else}
+							<div class="flex flex-col gap-2">
+								<span class="text-[9px] uppercase tracking-[0.1em]" style="color: var(--muted);">minor (optional)</span>
+								<select bind:value={minor} disabled={locked}
+									class="border bg-transparent px-3 py-2.5 text-xs outline-none disabled:opacity-30"
+									style="border-color: var(--border); color: var(--fg); background: var(--bg);">
+									<option value="">— none —</option>
+									{#each minorPrograms as p}<option value={p}>{p}</option>{/each}
+								</select>
+							</div>
+
+							{#each [{ l: 'uwe pref 1 (highest)', v: uwePref1, s: (x: string) => uwePref1 = x }, { l: 'uwe pref 2', v: uwePref2, s: (x: string) => uwePref2 = x }, { l: 'uwe pref 3 (lowest)', v: uwePref3, s: (x: string) => uwePref3 = x }] as pref}
+								<div class="flex flex-col gap-2">
+									<span class="text-[9px] uppercase tracking-[0.1em]" style="color: var(--muted);">{pref.l}</span>
+									<select value={pref.v} onchange={(e) => pref.s(e.currentTarget.value)} disabled={locked}
+										class="border bg-transparent px-3 py-2.5 text-xs outline-none disabled:opacity-30"
+										style="border-color: var(--border); color: var(--fg); background: var(--bg);">
+										<option value="">— select —</option>
+										{#each uweCourseOptions as c}<option value={c.courseCode.split('-')[0]}>{c.courseCode.split('-')[0]} — {c.courseName}</option>{/each}
+									</select>
+								</div>
+							{/each}
+
+							{#if prefError}<p class="text-xs" style="color: #e44;">{prefError}</p>{/if}
+							{#if prefSuccess}<p class="text-xs" style="color: #4e4;">{prefSuccess}</p>{/if}
+
+							{#if !locked}
+								<button onclick={submitPreferences} disabled={submitting}
+									class="mt-1 cursor-pointer border px-5 py-3 text-[10px] uppercase tracking-[0.2em] transition-all duration-300 hover:tracking-[0.25em] disabled:opacity-30 disabled:cursor-wait"
+									style="background: transparent; border-color: var(--border); color: var(--muted);"
+									onmouseenter={(e) => { e.currentTarget.style.borderColor = 'var(--muted)'; e.currentTarget.style.color = 'var(--accent)'; }}
+									onmouseleave={(e) => { e.currentTarget.style.borderColor = 'var(--border)'; e.currentTarget.style.color = 'var(--muted)'; }}
+								>{submitting ? 'saving...' : data.preference ? 'update preferences' : 'submit preferences'}</button>
+							{:else}
+								<p class="text-[10px] uppercase tracking-[0.12em]" style="color: var(--muted);">editing is locked by your class rep</p>
+							{/if}
+						{/if}
+					</div>
+				{/if}
 			</div>
 
 		<!-- ==================== STUDENT: MY TIMETABLE ==================== -->
@@ -805,6 +967,8 @@
 							<tbody>
 								{#each demand as item}
 									{@const level = getTrafficLight(item.courseCode)}
+									{@const adjustedLevel = adjustedConflictMap().get(item.courseCode) ?? level}
+									{@const conflictCleared = level !== 'green' && adjustedLevel === 'green'}
 									{@const match = courses.find((c) => c.courseCode.startsWith(item.courseCode))}
 									<tr style="border-bottom: 1px solid var(--border);">
 										<td class="px-3 py-2.5">
@@ -812,8 +976,18 @@
 											{#if match}<span class="ml-2 hidden text-[9px] md:inline" style="color: var(--muted);">{match.courseName}</span>{/if}
 										</td>
 										<td class="px-3 py-2.5" style="color: var(--muted);">{item.p1}/{item.p2}/{item.p3}</td>
-										<td class="px-3 py-2.5 font-medium" style="color: var(--fg);">{item.priorityScore}</td>
-										<td class="px-3 py-2.5"><span class="inline-block h-2 w-2 rounded-full" style="background: {tColors[level]};"></span></td>
+										<td class="px-3 py-2.5">
+											<span class="font-medium" style="color: var(--fg);">{item.priorityScore}</span>
+											<span class="ml-2 text-[9px]" style="color: var(--muted);">{item.total} interested</span>
+										</td>
+										<td class="px-3 py-2.5">
+											<div class="flex flex-wrap items-center gap-2">
+												<span class="inline-block h-2 w-2 rounded-full" style="background: {conflictCleared ? '#22c55e' : tColors[level]};"></span>
+												{#if conflictCleared}
+													<span class="text-[8px] uppercase tracking-[0.08em] px-1.5 py-0.5" style="color: #22c55e; border: 1px solid #22c55e44; background: #22c55e0d;">no conflict after adjustment</span>
+												{/if}
+											</div>
+										</td>
 									</tr>
 								{/each}
 							</tbody>
@@ -829,6 +1003,10 @@
 								<span class="text-[8px] uppercase tracking-[0.1em]" style="color: var(--muted);">{label}</span>
 							</div>
 						{/each}
+						<div class="flex items-center gap-1.5">
+							<span class="text-[8px] uppercase tracking-[0.08em] px-1.5 py-0.5" style="color: #22c55e; border: 1px solid #22c55e44; background: #22c55e0d;">no conflict after adjustment</span>
+							<span class="text-[8px] uppercase tracking-[0.1em]" style="color: var(--muted);">cr moved this slot</span>
+						</div>
 					</div>
 				{/if}
 			</div>

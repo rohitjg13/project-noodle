@@ -20,7 +20,7 @@ export const POST: RequestHandler = async ({ locals, request }) => {
 	if (!locals.user) return json({ error: 'Unauthorized' }, { status: 401 });
 
 	const body = await request.json();
-	const { minor, uwePref1, uwePref2, uwePref3 } = body;
+	const { batch, minor, uwePref1, uwePref2, uwePref3 } = body;
 
 	// Validate no duplicate UWE preferences
 	const uweChoices = [uwePref1, uwePref2, uwePref3].filter(Boolean);
@@ -42,11 +42,12 @@ export const POST: RequestHandler = async ({ locals, request }) => {
 	if (existing[0]) {
 		await db
 			.update(studentPreference)
-			.set({ minor, uwePref1, uwePref2, uwePref3 })
+			.set({ batch, minor, uwePref1, uwePref2, uwePref3 })
 			.where(eq(studentPreference.userId, locals.user.id));
 	} else {
 		await db.insert(studentPreference).values({
 			userId: locals.user.id,
+			batch,
 			minor,
 			uwePref1,
 			uwePref2,

@@ -11,6 +11,7 @@ export const studentPreference = pgTable('student_preference', {
 	userId: text('user_id')
 		.notNull()
 		.references(() => user.id, { onDelete: 'cascade' }),
+	batch: text('batch'),
 	minor: text('minor'),
 	uwePref1: text('uwe_pref_1'),
 	uwePref2: text('uwe_pref_2'),
