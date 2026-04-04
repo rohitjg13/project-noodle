@@ -1,5 +1,5 @@
 import { relations } from "drizzle-orm";
-import { pgTable, text, timestamp, index } from "drizzle-orm/pg-core";
+import { pgTable, text, timestamp, index, boolean } from "drizzle-orm/pg-core";
 import { user } from "./auth.schema";
 
 export const batch = pgTable("batch", {
@@ -30,6 +30,16 @@ export const crAssignment = pgTable(
     index("cr_assignment_batchId_idx").on(table.batchId),
   ]
 );
+
+export const notification = pgTable('notification', {
+  id: text('id').primaryKey(),
+  toUserId: text('to_user_id').notNull().references(() => user.id, { onDelete: 'cascade' }),
+  fromUserName: text('from_user_name').notNull(),
+  courseCode: text('course_code').notNull(),
+  message: text('message').notNull(),
+  dismissed: boolean('dismissed').default(false).notNull(),
+  createdAt: timestamp('created_at').defaultNow().notNull()
+}, (table) => [index('notification_toUserId_idx').on(table.toUserId)]);
 
 export const batchRelations = relations(batch, ({ many }) => ({
   crAssignments: many(crAssignment),

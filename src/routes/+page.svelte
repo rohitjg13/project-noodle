@@ -1,5 +1,6 @@
 <script lang="ts">
 	import { authClient } from '$lib/auth-client';
+	import { browser } from '$app/environment';
 	import type { Course, ConflictLevel } from '$lib/types';
 	import { parseDays, timeToMinutes, minutesToTime, getConflictLevel } from '$lib/types';
 
@@ -8,6 +9,7 @@
 	const isCR = data.user.role === 'cr';
 	const isSuperAdmin = data.user.role === 'super_admin';
 	const canManage = isCR || isSuperAdmin;
+	const globalTop5: { code: string; total: number }[] = data.globalTop5 ?? [];
 
 	let viewAsStudent = $state(!canManage);
 	let activeTab = $state<'preferences' | 'mytimetable' | 'demand' | 'timetable' | 'settings'>(canManage ? 'demand' : 'preferences');
@@ -43,6 +45,9 @@
 	let demandSort = $state<'score' | 'total'>('score');
 	let demandSortDir = $state<'desc' | 'asc'>('desc');
 	let loadingCR = $state(true);
+
+	// Notifications
+	let notifications = $state<{ id: string; fromUserName: string; courseCode: string; message: string; createdAt: number }[]>(data.notifications ?? []);
 
 	// Timetable state
 	let dragCourse = $state<Course | null>(null);
@@ -296,6 +301,16 @@
 	// Top 3 demanded UWEs (auto-enabled)
 	// Extract dept prefix: letters before any digit/dash/space, e.g. "ECE204" → "ECE", "PHL" → "PHL"
 	function deptPrefix(code: string) { return code.match(/^[A-Z]+/i)?.[0].toUpperCase() ?? code; }
+
+	function relativeTime(epoch: number): string {
+		const diff = Date.now() - epoch;
+		const mins = Math.floor(diff / 60000);
+		if (mins < 1) return 'just now';
+		if (mins < 60) return `${mins}m ago`;
+		const hours = Math.floor(mins / 60);
+		if (hours < 24) return `${hours}h ago`;
+		return `${Math.floor(hours / 24)}d ago`;
+	}
 	let demandDepts = $derived([...new Set(demand.map((d) => deptPrefix(d.courseCode)))].sort());
 	let filteredDemand = $derived(() => {
 		let items = deptFilter ? demand.filter((d) => deptPrefix(d.courseCode) === deptFilter) : demand;
@@ -548,12 +563,12 @@
 		dragOriginalDay = '';
 		dragIsUWE = false;
 
-		// If moving a core course that's in the top 5 UWE demand, warn the CR first
+		// If moving a core course that's in the global top 5 UWE demand, warn the CR first
 		if (!isUWE) {
 			const baseCode = course.courseCode.split('-')[0].toUpperCase();
-			const hit = demand.slice(0, 5).find((d) => d.courseCode.toUpperCase() === baseCode);
+			const hit = globalTop5.find((c) => c.code.toUpperCase() === baseCode);
 			if (hit) {
-				moveWarnModal = { courseCode: hit.courseCode, count: hit.total, pending: { course, origDay, day, newStart, newEnd } };
+				moveWarnModal = { courseCode: hit.code, count: hit.total, pending: { course, origDay, day, newStart, newEnd } };
 				return; // wait for confirm/cancel
 			}
 		}
@@ -566,8 +581,24 @@
 	async function confirmDrop() {
 		if (!moveWarnModal) return;
 		const { course, origDay, day, newStart, newEnd } = moveWarnModal.pending;
+		const courseCode = moveWarnModal.courseCode;
 		moveWarnModal = null;
 		await applyDrop(course, origDay, day, newStart, newEnd);
+		// Notify other CRs whose batch students have this course in their demand
+		fetch('/api/cr/notify', {
+			method: 'POST',
+			headers: { 'Content-Type': 'application/json' },
+			body: JSON.stringify({ courseCode })
+		});
+	}
+
+	async function dismissNotification(id: string) {
+		notifications = notifications.filter((n) => n.id !== id);
+		fetch('/api/notifications', {
+			method: 'DELETE',
+			headers: { 'Content-Type': 'application/json' },
+			body: JSON.stringify({ id })
+		});
 	}
 
 	async function applyDrop(course: Course, origDay: string, day: string, newStart: string, newEnd: string) {
@@ -664,9 +695,9 @@
 		{/if}
 		{#if !viewAsStudent && canManage}
 			<button onclick={() => activeTab = 'demand'}
-				class="cursor-pointer whitespace-nowrap border-none bg-transparent px-3 py-2.5 text-[10px] uppercase tracking-[0.12em]"
+				class="relative cursor-pointer whitespace-nowrap border-none bg-transparent px-3 py-2.5 text-[10px] uppercase tracking-[0.12em]"
 				style="color: {activeTab === 'demand' ? 'var(--accent)' : 'var(--muted)'}; border-bottom: 1px solid {activeTab === 'demand' ? 'var(--accent)' : 'transparent'}; margin-bottom: -1px;"
-			>demand</button>
+			>demand{#if notifications.length > 0}<span class="absolute right-1 top-1.5 h-1.5 w-1.5 rounded-full" style="background: var(--accent);"></span>{/if}</button>
 			<button onclick={() => activeTab = 'timetable'}
 				class="cursor-pointer whitespace-nowrap border-none bg-transparent px-3 py-2.5 text-[10px] uppercase tracking-[0.12em]"
 				style="color: {activeTab === 'timetable' ? 'var(--accent)' : 'var(--muted)'}; border-bottom: 1px solid {activeTab === 'timetable' ? 'var(--accent)' : 'transparent'}; margin-bottom: -1px;"
@@ -974,6 +1005,25 @@
 		<!-- ==================== CR: DEMAND ==================== -->
 		{:else if activeTab === 'demand'}
 			<div class="flex flex-col gap-6">
+				{#if notifications.length > 0}
+					<div class="flex flex-col gap-2">
+						{#each notifications as notif (notif.id)}
+							<div class="flex items-start justify-between gap-3 border px-4 py-3" style="border-color: var(--accent); border-left-width: 3px;">
+								<div class="flex flex-col gap-0.5">
+									<p class="text-[11px] tracking-wide" style="color: var(--fg);">{notif.message}</p>
+									<p class="text-[9px] uppercase tracking-[0.1em]" style="color: var(--muted);">{browser ? relativeTime(notif.createdAt) : ''}</p>
+								</div>
+								<button
+									onclick={() => dismissNotification(notif.id)}
+									class="shrink-0 cursor-pointer border-none bg-transparent text-[10px] uppercase tracking-[0.12em] transition-colors duration-200"
+									style="color: var(--muted);"
+									onmouseenter={(e) => { e.currentTarget.style.color = 'var(--accent)'; }}
+									onmouseleave={(e) => { e.currentTarget.style.color = 'var(--muted)'; }}
+								>dismiss</button>
+							</div>
+						{/each}
+					</div>
+				{/if}
 				<div class="flex flex-col gap-1 md:flex-row md:items-center md:justify-between">
 					<div>
 						<h2 class="text-lg" style="font-family: var(--font-serif); color: var(--accent);">uwe demand</h2>
