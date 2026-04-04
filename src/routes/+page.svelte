@@ -685,7 +685,9 @@
 					{:else}
 						<!-- Batch input editor -->
 						<div class="flex flex-col gap-2">
+							<p class="text-[9px] leading-relaxed" style="color: var(--muted);">select all your batches — e.g. ECE 2nd years have both <span style="color: var(--fg);">ELC2X</span> and <span style="color: var(--fg);">ELC2YR</span></p>
 							{#each batchInputs as input, i}
+								{@const isValid = allBatches().includes(batchInputs[i].trim().toUpperCase())}
 								<div class="relative flex gap-2">
 									<input
 										type="text"
@@ -695,8 +697,8 @@
 										onblur={() => setTimeout(() => { batchSuggestions[i] = []; batchSuggestions = [...batchSuggestions]; }, 150)}
 										placeholder="e.g. ELC21"
 										autocomplete="off"
-										class="flex-1 border bg-transparent px-3 py-2.5 text-xs uppercase outline-none transition-colors duration-200 focus:border-[var(--muted)]"
-										style="border-color: var(--border); color: var(--fg);"
+										class="flex-1 bg-transparent px-3 py-2.5 text-xs uppercase outline-none transition-all duration-200"
+										style="border: {isValid ? '1px dashed #22c55e' : '1px solid var(--border)'}; color: var(--fg);"
 									/>
 									{#if batchInputs.length > 1}
 										<button onclick={() => removeBatchInput(i)}
@@ -814,7 +816,7 @@
 				<!-- Batch selector -->
 				<div class="flex flex-col gap-3">
 					<h2 class="text-lg" style="font-family: var(--font-serif); color: var(--accent);">my timetable</h2>
-					<p class="text-[9px] uppercase tracking-[0.1em]" style="color: var(--muted);">enter your batch code(s) to view your schedule</p>
+					<p class="text-[9px] uppercase tracking-[0.1em]" style="color: var(--muted);">{selectedBatches.length ? selectedBatches.join(', ') : 'enter your batch code(s) to view your schedule'}</p>
 
 					<div class="flex flex-col gap-2">
 						{#each batchInputs as input, i}
