@@ -40,13 +40,18 @@
 	let constraints = $state<{ id: number; professorName: string; day: string; startTime: string | null; endTime: string | null; allDay: boolean; reason?: string | null }[]>([]);
 	let totalStudents = $state(0);
 	let deptFilter = $state('');
+	let demandSort = $state<'score' | 'total'>('score');
+	let demandSortDir = $state<'desc' | 'asc'>('desc');
 	let loadingCR = $state(true);
 
 	// Timetable state
 	let dragCourse = $state<Course | null>(null);
-	let dragOriginalDay = $state(''); // the XLSX day of the slot being dragged
+	let dragOriginalDay = $state('');
+	let dragIsUWE = $state(false);
 	let dragOffsetY = $state(0);
 	let dragOverSlot = $state<{ day: string; startMin: number } | null>(null);
+	type PendingDrop = { course: Course; origDay: string; day: string; newStart: string; newEnd: string };
+	let moveWarnModal = $state<{ courseCode: string; count: number; pending: PendingDrop } | null>(null);
 	// Override key: `courseCode|component|originalDay` — each day-slot independently overridable
 	// Initialize from server-loaded data so overrides are available on first render
 	function buildOverrideMapFromArray(blocks: { courseCode: string; component?: string | null; originalDay?: string | null; day: string; startTime: string; endTime: string }[]) {
@@ -289,6 +294,15 @@
 	let enabledUWEs = $state<Set<string>>(new Set());
 
 	// Top 3 demanded UWEs (auto-enabled)
+	// Extract dept prefix: letters before any digit/dash/space, e.g. "ECE204" → "ECE", "PHL" → "PHL"
+	function deptPrefix(code: string) { return code.match(/^[A-Z]+/i)?.[0].toUpperCase() ?? code; }
+	let demandDepts = $derived([...new Set(demand.map((d) => deptPrefix(d.courseCode)))].sort());
+	let filteredDemand = $derived(() => {
+		let items = deptFilter ? demand.filter((d) => deptPrefix(d.courseCode) === deptFilter) : demand;
+		const dir = demandSortDir === 'asc' ? -1 : 1;
+		return [...items].sort((a, b) => dir * (demandSort === 'total' ? b.total - a.total : b.priorityScore - a.priorityScore));
+	});
+
 	let topDemandedUWEs = $derived(demand.slice(0, 3).map((d) => d.courseCode));
 	let restDemandedUWEs = $derived(demand.slice(3));
 
@@ -491,9 +505,10 @@
 		return Math.round(rawMin / SNAP) * SNAP;
 	}
 
-	function onDragStart(e: DragEvent, course: Course, originalDay: string) {
+	function onDragStart(e: DragEvent, course: Course, originalDay: string, isUWE: boolean) {
 		dragCourse = course;
 		dragOriginalDay = originalDay;
+		dragIsUWE = isUWE;
 		dragOffsetY = e.offsetY;
 	}
 
@@ -528,8 +543,34 @@
 
 		const course = dragCourse;
 		const origDay = dragOriginalDay;
+		const isUWE = dragIsUWE;
 		dragCourse = null;
 		dragOriginalDay = '';
+		dragIsUWE = false;
+
+		// If moving a core course that's in the top 5 UWE demand, warn the CR first
+		if (!isUWE) {
+			const baseCode = course.courseCode.split('-')[0].toUpperCase();
+			const hit = demand.slice(0, 5).find((d) => d.courseCode.toUpperCase() === baseCode);
+			if (hit) {
+				moveWarnModal = { courseCode: hit.courseCode, count: hit.total, pending: { course, origDay, day, newStart, newEnd } };
+				return; // wait for confirm/cancel
+			}
+		}
+
+		await applyDrop(course, origDay, day, newStart, newEnd);
+	}
+
+	function cancelDrop() { moveWarnModal = null; }
+
+	async function confirmDrop() {
+		if (!moveWarnModal) return;
+		const { course, origDay, day, newStart, newEnd } = moveWarnModal.pending;
+		moveWarnModal = null;
+		await applyDrop(course, origDay, day, newStart, newEnd);
+	}
+
+	async function applyDrop(course: Course, origDay: string, day: string, newStart: string, newEnd: string) {
 		const overrideKey = `${course.courseCode}|${course.component ?? ''}|${origDay}`;
 		const prevOverride = scheduleOverrides.get(overrideKey);
 
@@ -945,29 +986,47 @@
 							onmouseenter={(e) => { e.currentTarget.style.color = 'var(--accent)'; }}
 							onmouseleave={(e) => { e.currentTarget.style.color = locked ? '#e44' : 'var(--muted)'; }}
 						>{locked ? 'unlock editing' : 'lock preferences'}</button>
-						<select bind:value={deptFilter}
-							class="border bg-transparent px-3 py-2 text-[10px] outline-none"
-							style="border-color: var(--border); color: var(--fg); background: var(--bg);">
-							<option value="">all depts</option>
-						</select>
 					</div>
 				</div>
 
 				{#if loadingCR}
 					<p class="text-xs animate-pulse" style="color: var(--muted);">loading...</p>
 				{:else}
+					<!-- Filter chips — horizontally scrollable so 20+ depts stay tidy -->
+					{#if demandDepts.length > 1}
+						<div class="flex gap-1.5 overflow-x-auto pb-0.5" style="scrollbar-width: none;">
+							<button onclick={() => deptFilter = ''}
+								class="cursor-pointer shrink-0 border px-2.5 py-1 text-[9px] uppercase tracking-[0.08em] transition-all duration-150"
+								style="border-color: {!deptFilter ? 'var(--muted)' : 'var(--border)'}; color: {!deptFilter ? 'var(--fg)' : 'var(--muted)'}; background: transparent;"
+							>all</button>
+							{#each demandDepts as dept}
+								<button onclick={() => deptFilter = deptFilter === dept ? '' : dept}
+									class="cursor-pointer shrink-0 border px-2.5 py-1 text-[9px] uppercase tracking-[0.08em] transition-all duration-150"
+									style="border-color: {deptFilter === dept ? 'var(--accent)' : 'var(--border)'}; color: {deptFilter === dept ? 'var(--accent)' : 'var(--muted)'}; background: {deptFilter === dept ? 'rgba(255,255,255,0.03)' : 'transparent'};"
+								>{dept}</button>
+							{/each}
+						</div>
+					{/if}
+
 					<div class="overflow-x-auto -mx-4 md:mx-0">
 						<table class="w-full min-w-[480px] text-left text-xs" style="border-collapse: collapse;">
 							<thead>
 								<tr style="border-bottom: 1px solid var(--border);">
 									<th class="px-3 py-2 text-[9px] uppercase tracking-[0.1em] font-normal" style="color: var(--muted);">course</th>
 									<th class="px-3 py-2 text-[9px] uppercase tracking-[0.1em] font-normal" style="color: var(--muted);">p1/p2/p3</th>
-									<th class="px-3 py-2 text-[9px] uppercase tracking-[0.1em] font-normal" style="color: var(--muted);">score</th>
+									<th class="px-3 py-2 text-[9px] uppercase tracking-[0.1em] font-normal cursor-pointer select-none whitespace-nowrap"
+										style="color: {demandSort === 'score' ? 'var(--accent)' : 'var(--muted)'};"
+										onclick={() => { if (demandSort === 'score') demandSortDir = demandSortDir === 'desc' ? 'asc' : 'desc'; else { demandSort = 'score'; demandSortDir = 'desc'; } }}
+									>score <span style="display: inline-block; width: 0.75em; text-align: center;">{demandSort === 'score' ? (demandSortDir === 'desc' ? '↓' : '↑') : ''}</span></th>
+									<th class="px-3 py-2 text-[9px] uppercase tracking-[0.1em] font-normal cursor-pointer select-none whitespace-nowrap"
+										style="color: {demandSort === 'total' ? 'var(--accent)' : 'var(--muted)'};"
+										onclick={() => { if (demandSort === 'total') demandSortDir = demandSortDir === 'desc' ? 'asc' : 'desc'; else { demandSort = 'total'; demandSortDir = 'desc'; } }}
+									>interested <span style="display: inline-block; width: 0.75em; text-align: center;">{demandSort === 'total' ? (demandSortDir === 'desc' ? '↓' : '↑') : ''}</span></th>
 									<th class="px-3 py-2 text-[9px] uppercase tracking-[0.1em] font-normal" style="color: var(--muted);">status</th>
 								</tr>
 							</thead>
 							<tbody>
-								{#each demand as item}
+								{#each filteredDemand() as item}
 									{@const level = getTrafficLight(item.courseCode)}
 									{@const adjustedLevel = adjustedConflictMap().get(item.courseCode) ?? level}
 									{@const conflictCleared = level !== 'green' && adjustedLevel === 'green'}
@@ -978,10 +1037,8 @@
 											{#if match}<span class="ml-2 hidden text-[9px] md:inline" style="color: var(--muted);">{match.courseName}</span>{/if}
 										</td>
 										<td class="px-3 py-2.5" style="color: var(--muted);">{item.p1}/{item.p2}/{item.p3}</td>
-										<td class="px-3 py-2.5">
-											<span class="font-medium" style="color: var(--fg);">{item.priorityScore}</span>
-											<span class="ml-2 text-[9px]" style="color: var(--muted);">{item.total} interested</span>
-										</td>
+										<td class="px-3 py-2.5 font-medium" style="color: var(--fg);">{item.priorityScore}</td>
+										<td class="px-3 py-2.5" style="color: var(--muted);">{item.total}</td>
 										<td class="px-3 py-2.5">
 											<div class="flex flex-wrap items-center gap-2">
 												<span class="inline-block h-2 w-2 rounded-full" style="background: {conflictCleared ? '#22c55e' : tColors[level]};"></span>
@@ -995,7 +1052,7 @@
 							</tbody>
 						</table>
 					</div>
-					{#if !demand.length}<p class="text-center text-xs py-8" style="color: var(--muted);">no submissions yet</p>{/if}
+					{#if !filteredDemand().length}<p class="text-center text-xs py-8" style="color: var(--muted);">{demand.length ? 'no courses match this filter' : 'no submissions yet'}</p>{/if}
 
 					<!-- Legend -->
 					<div class="flex flex-wrap gap-4 pt-3" style="border-top: 1px solid var(--border);">
@@ -1134,9 +1191,9 @@
 													{@const h = ((block.endMin - block.startMin) / 60) * CELL_H}
 													{@const level = block.isUWE ? getTrafficLight(block.course.courseCode.split('-')[0]) : null}
 													<div role="button" tabindex="0"
-														class="absolute left-0.5 right-0.5 overflow-hidden px-1 py-0.5 cursor-grab active:cursor-grabbing"
+														class="absolute left-0.5 right-0.5 overflow-hidden px-1 py-0.5 {block.isUWE ? 'cursor-default' : 'cursor-grab active:cursor-grabbing'}"
 														style="top: {top}px; height: {h}px; min-height: 20px; background: {block.isUWE ? 'rgba(255,255,255,0.04)' : 'var(--surface)'}; border: 1px solid {block.isUWE && level ? tColors[level] + '66' : 'var(--border)'}; z-index: 2; {block.isUWE ? 'border-left: 3px solid ' + (level ? tColors[level] : 'var(--border)') + ';' : ''}"
-														draggable="true" ondragstart={(e) => onDragStart(e, block.course, block.originalDay)}>
+														draggable={!block.isUWE} ondragstart={(e) => { if (!block.isUWE) onDragStart(e, block.course, block.originalDay, block.isUWE); }}>
 														<div class="text-[8px] font-medium truncate" style="color: {block.isUWE ? (level ? tColors[level] : 'var(--fg)') : 'var(--fg)'};">{block.course.courseCode.split('-')[0]}</div>
 														<div class="text-[7px] truncate" style="color: var(--muted);">{block.course.courseName}</div>
 														{#if h > 32}
@@ -1315,5 +1372,36 @@
 	{#if toast}
 		<div class="fixed bottom-5 left-1/2 z-50 -translate-x-1/2 border px-4 py-2.5 text-[10px]"
 			style="background: var(--surface); border-color: var(--border); color: var(--fg);">{toast}</div>
+	{/if}
+
+	<!-- UWE conflict warning modal -->
+	{#if moveWarnModal}
+		<div class="fixed inset-0 z-50 flex items-center justify-center px-4" style="background: rgba(0,0,0,0.6);" onclick={cancelDrop}>
+			<div class="flex w-full max-w-sm flex-col gap-5 border p-6" style="background: var(--surface); border-color: var(--border);" onclick={(e) => e.stopPropagation()}>
+				<div class="flex flex-col gap-2">
+					<p class="text-[9px] uppercase tracking-[0.15em]" style="color: var(--accent);">heads up</p>
+					<p class="text-sm leading-relaxed" style="color: var(--fg);">
+						<span class="font-medium">{moveWarnModal.count} {moveWarnModal.count === 1 ? 'student has' : 'students have'}</span> listed
+						<span class="font-medium">{moveWarnModal.courseCode}</span> as a UWE preference.
+						Shifting this class may create conflicts for them.
+					</p>
+					<p class="text-xs" style="color: var(--muted);">Do you still want to proceed with the move?</p>
+				</div>
+				<div class="flex gap-3 justify-end">
+					<button onclick={cancelDrop}
+						class="cursor-pointer border px-4 py-2 text-[9px] uppercase tracking-[0.12em] transition-colors duration-150"
+						style="border-color: var(--border); color: var(--muted); background: transparent;"
+						onmouseenter={(e) => { e.currentTarget.style.color = 'var(--fg)'; }}
+						onmouseleave={(e) => { e.currentTarget.style.color = 'var(--muted)'; }}
+					>cancel</button>
+					<button onclick={confirmDrop}
+						class="cursor-pointer border px-4 py-2 text-[9px] uppercase tracking-[0.12em] transition-colors duration-150"
+						style="border-color: var(--muted); color: var(--fg); background: transparent;"
+						onmouseenter={(e) => { e.currentTarget.style.borderColor = 'var(--accent)'; e.currentTarget.style.color = 'var(--accent)'; }}
+						onmouseleave={(e) => { e.currentTarget.style.borderColor = 'var(--muted)'; e.currentTarget.style.color = 'var(--fg)'; }}
+					>yes, move it</button>
+				</div>
+			</div>
+		</div>
 	{/if}
 </div>

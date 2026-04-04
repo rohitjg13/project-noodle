@@ -1,7 +1,8 @@
 import { json } from '@sveltejs/kit';
 import type { RequestHandler } from './$types';
 import { db } from '$lib/server/db';
-import { studentPreference } from '$lib/server/db/schema';
+import { studentPreference, crAssignment, batch } from '$lib/server/db/schema';
+import { eq, or, ilike } from 'drizzle-orm';
 import { calculatePriorityScore } from '$lib/types';
 
 export const GET: RequestHandler = async ({ locals }) => {
@@ -10,7 +11,25 @@ export const GET: RequestHandler = async ({ locals }) => {
 		return json({ error: 'Forbidden' }, { status: 403 });
 	}
 
-	const allPrefs = await db.select().from(studentPreference);
+	// super_admin sees all students; CRs see only their assigned batches
+	let allPrefs;
+	if (locals.user.role === 'super_admin') {
+		allPrefs = await db.select().from(studentPreference);
+	} else {
+		const assignments = await db
+			.select({ batchName: batch.name })
+			.from(crAssignment)
+			.innerJoin(batch, eq(crAssignment.batchId, batch.id))
+			.where(eq(crAssignment.userId, locals.user.id));
+
+		const batchNames = assignments.map((a) => a.batchName);
+		allPrefs = batchNames.length === 0
+			? []
+			: await db
+				.select()
+				.from(studentPreference)
+				.where(or(...batchNames.map((name) => ilike(studentPreference.batch, `%${name}%`))));
+	}
 
 	const demandMap = new Map<
 		string,

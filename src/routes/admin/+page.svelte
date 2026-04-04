@@ -15,17 +15,25 @@
 </script>
 
 <div class="flex min-h-screen flex-col px-8 py-8" style="background: var(--bg);">
-	<header class="flex items-center gap-6">
-		<a
-			href="/"
-			class="text-lg transition-colors duration-200"
-			style="font-family: var(--font-serif); color: var(--accent);"
-		>
-			noodle
-		</a>
-		<span class="text-[10px] uppercase tracking-[0.15em]" style="color: var(--muted);">
-			/ admin
-		</span>
+	<header class="flex items-center justify-between">
+		<div class="flex items-center gap-6">
+			<a
+				href="/"
+				class="text-lg transition-colors duration-200"
+				style="font-family: var(--font-serif); color: var(--accent);"
+			>
+				noodle
+			</a>
+			<span class="text-[10px] uppercase tracking-[0.15em]" style="color: var(--muted);">
+				/ admin
+			</span>
+		</div>
+		<a href="/auth/signout"
+			class="text-[10px] uppercase tracking-[0.12em] no-underline transition-colors duration-200"
+			style="color: var(--muted);"
+			onmouseenter={(e) => { e.currentTarget.style.color = 'var(--accent)'; }}
+			onmouseleave={(e) => { e.currentTarget.style.color = 'var(--muted)'; }}
+		>sign out</a>
 	</header>
 
 	<main class="mx-auto flex w-full max-w-2xl flex-1 flex-col gap-12 py-12">
