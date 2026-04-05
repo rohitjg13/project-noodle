@@ -55,6 +55,17 @@
 	let dragIsUWE = $state(false);
 	let dragOffsetY = $state(0);
 	let dragOverSlot = $state<{ day: string; startMin: number } | null>(null);
+
+	// Touch drag state (mobile)
+	let touchDragCourse = $state<Course | null>(null);
+	let touchDragOriginalDay = $state('');
+	let touchDragIsUWE = $state(false);
+	let touchDragOffsetX = $state(0);
+	let touchDragOffsetY = $state(0);
+	let touchX = $state(0);
+	let touchY = $state(0);
+	let touchGhostW = $state(0);
+	let touchGhostH = $state(0);
 	type PendingDrop = { course: Course; origDay: string; day: string; newStart: string; newEnd: string };
 	let moveWarnModal = $state<{ courseCode: string; count: number; pending: PendingDrop } | null>(null);
 	// Override key: `courseCode|component|originalDay` — each day-slot independently overridable
@@ -540,6 +551,93 @@
 		dragOffsetY = e.offsetY;
 	}
 
+	function onTouchStart(e: TouchEvent, course: Course, originalDay: string, isUWE: boolean) {
+		if (isUWE) return;
+		const touch = e.touches[0];
+		const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
+		touchDragCourse = course;
+		touchDragOriginalDay = originalDay;
+		touchDragIsUWE = isUWE;
+		touchDragOffsetX = touch.clientX - rect.left;
+		touchDragOffsetY = touch.clientY - rect.top;
+		touchX = touch.clientX;
+		touchY = touch.clientY;
+		touchGhostW = rect.width;
+		touchGhostH = rect.height;
+	}
+
+	function handleTouchMove(e: TouchEvent) {
+		if (!touchDragCourse) return;
+		e.preventDefault();
+		const touch = e.touches[0];
+		touchX = touch.clientX;
+		touchY = touch.clientY;
+
+		const el = document.elementFromPoint(touch.clientX, touch.clientY);
+		const cell = el?.closest('[data-day][data-hstart]') as HTMLElement | null;
+		if (cell) {
+			const day = cell.dataset.day!;
+			const hStart = parseInt(cell.dataset.hstart!);
+			const rect = cell.getBoundingClientRect();
+			const topY = (touch.clientY - rect.top) - touchDragOffsetY;
+			const newMin = snapMin(hStart + (topY / CELL_H) * 60);
+			if (dragOverSlot?.day !== day || dragOverSlot?.startMin !== newMin) {
+				dragOverSlot = { day, startMin: newMin };
+			}
+		} else {
+			dragOverSlot = null;
+		}
+	}
+
+	function handleTouchEnd(e: TouchEvent) {
+		if (!touchDragCourse) return;
+		const touch = e.changedTouches[0];
+		const el = document.elementFromPoint(touch.clientX, touch.clientY);
+		const cell = el?.closest('[data-day][data-hstart]') as HTMLElement | null;
+
+		const course = touchDragCourse;
+		const origDay = touchDragOriginalDay;
+		const isUWE = touchDragIsUWE;
+		touchDragCourse = null;
+		touchDragOriginalDay = '';
+		touchDragIsUWE = false;
+		dragOverSlot = null;
+
+		if (!cell) return;
+		const day = cell.dataset.day!;
+		const hStart = parseInt(cell.dataset.hstart!);
+		const rect = cell.getBoundingClientRect();
+		const topY = (touch.clientY - rect.top) - touchDragOffsetY;
+		const dropMin = snapMin(hStart + (topY / CELL_H) * 60);
+
+		const dur = timeToMinutes(course.endTime || '') - timeToMinutes(course.startTime || '');
+		const msg = isConstrained(day, dropMin, dropMin + dur);
+		if (msg) { showToast(msg); return; }
+
+		const newStart = minutesToTime(dropMin);
+		const newEnd = minutesToTime(dropMin + dur);
+
+		if (!isUWE) {
+			const baseCode = course.courseCode.split('-')[0].toUpperCase();
+			const hit = globalTop5.find((c) => c.code.toUpperCase() === baseCode);
+			if (hit) {
+				moveWarnModal = { courseCode: hit.code, count: hit.total, pending: { course, origDay, day, newStart, newEnd } };
+				return;
+			}
+		}
+		applyDrop(course, origDay, day, newStart, newEnd);
+	}
+
+	$effect(() => {
+		if (!browser) return;
+		window.addEventListener('touchmove', handleTouchMove, { passive: false });
+		window.addEventListener('touchend', handleTouchEnd);
+		return () => {
+			window.removeEventListener('touchmove', handleTouchMove);
+			window.removeEventListener('touchend', handleTouchEnd);
+		};
+	});
+
 	function onDragOver(e: DragEvent, day: string, hStart: number) {
 		e.preventDefault();
 		// Throttle state updates to ~30fps to prevent lag
@@ -664,6 +762,14 @@
 	const tColors: Record<string, string> = { green: '#22c55e', yellow: '#eab308', red: '#ef4444' };
 	const DAY_LIST = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
 </script>
+
+<!-- Touch drag ghost (mobile only) -->
+{#if touchDragCourse}
+	<div style="position: fixed; left: {touchX - touchDragOffsetX}px; top: {touchY - touchDragOffsetY}px; width: {touchGhostW}px; height: {touchGhostH}px; pointer-events: none; z-index: 9999; opacity: 0.85; background: rgba(17,17,17,0.9); border: 1px solid var(--accent); padding: 2px 4px; overflow: hidden;">
+		<div class="text-[10px] font-medium truncate" style="color: var(--fg);">{touchDragCourse.courseCode.split('-')[0]}</div>
+		<div class="text-[9px] truncate" style="color: var(--muted);">{touchDragCourse.courseName}</div>
+	</div>
+{/if}
 
 <div class="flex min-h-dvh flex-col" style="background: var(--bg);">
 	<!-- Header -->
@@ -1138,7 +1244,7 @@
 		<!-- ==================== CR: TIMETABLE ==================== -->
 		{:else if activeTab === 'timetable'}
 			<div class="flex flex-col gap-5">
-				<div class="flex items-start justify-between gap-4">
+				<div class="flex flex-wrap items-start justify-between gap-2">
 					<div class="min-w-0">
 						<h2 class="text-lg" style="font-family: var(--font-serif); color: var(--accent);">weekly schedule</h2>
 						<p class="text-[9px] uppercase tracking-[0.1em]" style="color: var(--muted);">
@@ -1148,7 +1254,7 @@
 							{crBatchCourses().length} courses
 						</p>
 					</div>
-					<div class="flex shrink-0 items-center gap-3">
+					<div class="flex flex-wrap items-center gap-2">
 						<!-- Originals toggle + reset -->
 						{#if scheduleOverrides.size > 0}
 							<button
@@ -1184,7 +1290,7 @@
 							>reset positions</button>
 						{/if}
 						<!-- Sync status -->
-						<span class="text-[9px] uppercase tracking-[0.12em]" style="color: {syncStatus === 'saving' ? 'var(--muted)' : syncStatus === 'saved' ? '#4e4' : syncStatus === 'error' ? '#e44' : 'var(--border)'};">
+						<span class="text-[9px] uppercase tracking-[0.12em] text-right" style="min-width: 5.5rem; color: {syncStatus === 'saving' ? 'var(--muted)' : syncStatus === 'saved' ? '#4e4' : syncStatus === 'error' ? '#e44' : 'var(--border)'};">
 							{#if syncStatus === 'saving'}saving…{:else if syncStatus === 'saved'}synced ✓{:else if syncStatus === 'error'}sync failed{:else if lastSyncedAt > 0}live{/if}
 						</span>
 					</div>
@@ -1248,6 +1354,7 @@
 											{@const cMsg = isConstrained(day, hStart, hEnd)}
 											<div class="relative" style="height: {CELL_H}px; border-right: 1px solid var(--border); border-bottom: 1px solid var(--border); {cMsg ? 'background: rgba(255,255,255,0.02);' : ''}"
 												role="cell" tabindex="-1"
+												data-day={day} data-hstart={hStart}
 												ondragover={(e) => onDragOver(e, day, hStart)}
 												ondrop={(e) => onDrop(e, day, hStart)}>
 												{#if cMsg}<div class="absolute inset-0 flex items-center justify-center opacity-15"><span class="text-[7px] uppercase" style="color: var(--muted);">locked</span></div>{/if}
@@ -1265,6 +1372,7 @@
 														style="top: {top}px; height: {h}px; min-height: 20px; background: {block.isUWE ? 'rgba(255,255,255,0.04)' : 'rgba(17,17,17,0.75)'}; border: 1px solid {block.isUWE && level ? tColors[level] + '66' : 'var(--border)'}; z-index: {block.isUWE ? 1 : 2}; {block.isUWE ? 'border-left: 3px solid ' + (level ? tColors[level] : 'var(--border)') + ';' : ''}"
 														draggable={!block.isUWE}
 														ondragstart={(e) => { if (!block.isUWE) onDragStart(e, block.course, block.originalDay, block.isUWE); }}
+														ontouchstart={(e) => { if (!block.isUWE) onTouchStart(e, block.course, block.originalDay, block.isUWE); }}
 														onclick={(e) => { if (block.isUWE && uweGroup.length > 1) cycleUwe(uweKey, uweGroup.length, e); }}>
 														{#if block.isUWE && uweGroup.length > 1}
 															<div style="position: absolute; top: 2px; right: 2px; background: {level ? tColors[level] : 'var(--muted)'}; color: #000; border-radius: 3px; padding: 0 3px; font-size: 7px; font-weight: 700; line-height: 12px; letter-spacing: 0.03em; pointer-events: none;">

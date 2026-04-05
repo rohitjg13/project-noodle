@@ -28,12 +28,20 @@
 				/ admin
 			</span>
 		</div>
-		<a href="/auth/signout"
-			class="text-[10px] uppercase tracking-[0.12em] no-underline transition-colors duration-200"
-			style="color: var(--muted);"
-			onmouseenter={(e) => { e.currentTarget.style.color = 'var(--accent)'; }}
-			onmouseleave={(e) => { e.currentTarget.style.color = 'var(--muted)'; }}
-		>sign out</a>
+		<div class="flex items-center gap-5">
+			<a href="/"
+				class="text-[10px] uppercase tracking-[0.12em] no-underline transition-colors duration-200"
+				style="color: var(--muted);"
+				onmouseenter={(e) => { e.currentTarget.style.color = 'var(--accent)'; }}
+				onmouseleave={(e) => { e.currentTarget.style.color = 'var(--muted)'; }}
+			>← back</a>
+			<a href="/auth/signout"
+				class="text-[10px] uppercase tracking-[0.12em] no-underline transition-colors duration-200"
+				style="color: var(--muted);"
+				onmouseenter={(e) => { e.currentTarget.style.color = 'var(--accent)'; }}
+				onmouseleave={(e) => { e.currentTarget.style.color = 'var(--muted)'; }}
+			>sign out</a>
+		</div>
 	</header>
 
 	<main class="mx-auto flex w-full max-w-2xl flex-1 flex-col gap-12 py-12">
@@ -184,3 +192,10 @@
 
 	</main>
 </div>
+
+<footer class="py-4 text-center text-[9px] uppercase tracking-[0.12em]" style="color: var(--muted); background: var(--bg);">
+	built and maintained by <a href="https://github.com/rohitjg13" target="_blank" rel="noopener noreferrer" style="color: var(--muted); text-decoration: underline; text-underline-offset: 3px; transition: color 0.15s;"
+		onmouseenter={(e) => { (e.currentTarget as HTMLAnchorElement).style.color = 'var(--accent)'; }}
+		onmouseleave={(e) => { (e.currentTarget as HTMLAnchorElement).style.color = 'var(--muted)'; }}
+	>rohit j g</a>
+</footer>
