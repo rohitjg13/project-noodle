@@ -482,8 +482,20 @@
 		submitting = false;
 	}
 
+	let lockSubmitting = $state(false);
+
+	// UWE overlap cycling: key = "day|startMin|endMin"
+	let uweGroupActive = $state(new Map<string, number>());
+	function cycleUwe(key: string, total: number, e: MouseEvent) {
+		e.stopPropagation();
+		const cur = uweGroupActive.get(key) ?? 0;
+		uweGroupActive = new Map(uweGroupActive).set(key, (cur + 1) % total);
+	}
+
 	// CR lock/unlock all preferences
 	async function toggleLockAll() {
+		if (lockSubmitting) return;
+		lockSubmitting = true;
 		const newState = !locked;
 		const res = await fetch('/api/student/preferences/lock', {
 			method: 'POST',
@@ -491,6 +503,7 @@
 			body: JSON.stringify({ locked: newState })
 		});
 		if (res.ok) { locked = newState; showToast(newState ? 'preferences locked' : 'preferences unlocked'); }
+		lockSubmitting = false;
 	}
 
 	// Constraint management
@@ -720,9 +733,9 @@
 					<h2 class="text-lg" style="font-family: var(--font-serif); color: var(--accent);">your profile</h2>
 					<div class="grid grid-cols-2 gap-2">
 						{#each [['name', data.user.name], ['email', data.user.email], ['role', data.user.role]] as [label, value]}
-							<div class="flex flex-col gap-0.5 border px-3 py-2.5" style="border-color: var(--border);">
-								<span class="text-[9px] uppercase tracking-[0.1em]" style="color: var(--muted);">{label}</span>
-								<span class="text-xs truncate" style="color: var(--fg);">{value}</span>
+							<div class="flex flex-col gap-0.5 border px-3 py-3" style="border-color: var(--border);">
+								<span class="text-[10px] uppercase tracking-[0.1em]" style="color: var(--muted);">{label}</span>
+								<span class="text-sm truncate" style="color: var(--fg);">{value}</span>
 							</div>
 						{/each}
 					</div>
@@ -774,7 +787,7 @@
 									/>
 									{#if batchInputs.length > 1}
 										<button onclick={() => removeBatchInput(i)}
-											class="cursor-pointer border-none bg-transparent px-2 text-xs transition-colors duration-200"
+											class="cursor-pointer border-none bg-transparent px-3 py-2 text-base transition-colors duration-200"
 											style="color: var(--muted);"
 											onmouseenter={(e) => { e.currentTarget.style.color = '#e44'; }}
 											onmouseleave={(e) => { e.currentTarget.style.color = 'var(--muted)'; }}
@@ -786,7 +799,8 @@
 											{#each batchSuggestions[i] as suggestion}
 												<button
 													onmousedown={() => selectBatchSuggestion(i, suggestion)}
-													class="block w-full cursor-pointer border-none bg-transparent px-3 py-2 text-left text-[10px] uppercase tracking-[0.1em] transition-colors duration-100"
+													ontouchstart={() => selectBatchSuggestion(i, suggestion)}
+													class="block w-full cursor-pointer border-none bg-transparent px-3 py-3 text-left text-xs uppercase tracking-[0.1em] transition-colors duration-100"
 													style="color: var(--muted);"
 													onmouseenter={(e) => { e.currentTarget.style.background = 'var(--border)'; e.currentTarget.style.color = 'var(--accent)'; }}
 													onmouseleave={(e) => { e.currentTarget.style.background = 'transparent'; e.currentTarget.style.color = 'var(--muted)'; }}
@@ -845,7 +859,7 @@
 							<div class="flex flex-col gap-2">
 								<span class="text-[9px] uppercase tracking-[0.1em]" style="color: var(--muted);">minor (optional)</span>
 								<select bind:value={minor} disabled={locked}
-									class="border bg-transparent px-3 py-2.5 text-xs outline-none disabled:opacity-30"
+									class="border bg-transparent px-3 py-3 text-sm outline-none disabled:opacity-30"
 									style="border-color: var(--border); color: var(--fg); background: var(--bg);">
 									<option value="">— none —</option>
 									{#each minorPrograms as p}<option value={p}>{p}</option>{/each}
@@ -854,9 +868,9 @@
 
 							{#each [{ l: 'uwe pref 1 (highest)', v: uwePref1, s: (x: string) => uwePref1 = x }, { l: 'uwe pref 2', v: uwePref2, s: (x: string) => uwePref2 = x }, { l: 'uwe pref 3 (lowest)', v: uwePref3, s: (x: string) => uwePref3 = x }] as pref}
 								<div class="flex flex-col gap-2">
-									<span class="text-[9px] uppercase tracking-[0.1em]" style="color: var(--muted);">{pref.l}</span>
+									<span class="text-xs uppercase tracking-[0.1em]" style="color: var(--muted);">{pref.l}</span>
 									<select value={pref.v} onchange={(e) => pref.s(e.currentTarget.value)} disabled={locked}
-										class="border bg-transparent px-3 py-2.5 text-xs outline-none disabled:opacity-30"
+										class="border bg-transparent px-3 py-3 text-sm outline-none disabled:opacity-30"
 										style="border-color: var(--border); color: var(--fg); background: var(--bg);">
 										<option value="">— select —</option>
 										{#each uweCourseOptions as c}<option value={c.courseCode.split('-')[0]}>{c.courseCode.split('-')[0]} — {c.courseName}</option>{/each}
@@ -869,13 +883,13 @@
 
 							{#if !locked}
 								<button onclick={submitPreferences} disabled={submitting}
-									class="mt-1 cursor-pointer border px-5 py-3 text-[10px] uppercase tracking-[0.2em] transition-all duration-300 hover:tracking-[0.25em] disabled:opacity-30 disabled:cursor-wait"
+									class="mt-1 w-full cursor-pointer border px-5 py-3.5 text-xs uppercase tracking-[0.2em] transition-all duration-300 hover:tracking-[0.25em] disabled:opacity-30 disabled:cursor-wait"
 									style="background: transparent; border-color: var(--border); color: var(--muted);"
 									onmouseenter={(e) => { e.currentTarget.style.borderColor = 'var(--muted)'; e.currentTarget.style.color = 'var(--accent)'; }}
 									onmouseleave={(e) => { e.currentTarget.style.borderColor = 'var(--border)'; e.currentTarget.style.color = 'var(--muted)'; }}
 								>{submitting ? 'saving...' : data.preference ? 'update preferences' : 'submit preferences'}</button>
 							{:else}
-								<p class="text-[10px] uppercase tracking-[0.12em]" style="color: var(--muted);">editing is locked by your class rep</p>
+								<p class="text-xs uppercase tracking-[0.12em]" style="color: var(--muted);">editing is locked by your class rep</p>
 							{/if}
 						{/if}
 					</div>
@@ -906,7 +920,7 @@
 								/>
 								{#if batchInputs.length > 1}
 									<button onclick={() => removeBatchInput(i)}
-										class="cursor-pointer border-none bg-transparent px-2 text-xs transition-colors duration-200"
+										class="cursor-pointer border-none bg-transparent px-3 py-2 text-base transition-colors duration-200"
 										style="color: var(--muted);"
 										onmouseenter={(e) => { e.currentTarget.style.color = '#e44'; }}
 										onmouseleave={(e) => { e.currentTarget.style.color = 'var(--muted)'; }}
@@ -919,7 +933,8 @@
 										{#each batchSuggestions[i] as suggestion}
 											<button
 												onmousedown={() => selectBatchSuggestion(i, suggestion)}
-												class="block w-full cursor-pointer border-none bg-transparent px-3 py-2 text-left text-[10px] uppercase tracking-[0.1em] transition-colors duration-100"
+												ontouchstart={() => selectBatchSuggestion(i, suggestion)}
+												class="block w-full cursor-pointer border-none bg-transparent px-3 py-3 text-left text-xs uppercase tracking-[0.1em] transition-colors duration-100"
 												style="color: var(--muted);"
 												onmouseenter={(e) => { e.currentTarget.style.background = 'var(--border)'; e.currentTarget.style.color = 'var(--accent)'; }}
 												onmouseleave={(e) => { e.currentTarget.style.background = 'transparent'; e.currentTarget.style.color = 'var(--muted)'; }}
@@ -972,7 +987,7 @@
 								{#each sTimeLabels as { mins, label }, i}
 									{#if i < sTimeLabels.length - 1}
 										<div class="relative px-0.5 text-right" style="height: 56px; border-right: 1px solid var(--border); border-bottom: 1px solid var(--border);">
-											<span class="text-[7px]" style="color: var(--muted);">{label}</span>
+											<span class="text-[9px]" style="color: var(--muted);">{label}</span>
 										</div>
 										{#each DAYS as day}
 											{@const hStart = mins}
@@ -982,11 +997,11 @@
 													{@const top = ((block.startMin - hStart) / 60) * 100}
 													{@const h = ((block.endMin - block.startMin) / 60) * 56}
 													<div class="absolute left-0.5 right-0.5 overflow-hidden px-1 py-0.5"
-														style="top: {top}%; height: {h}px; min-height: 24px; background: var(--surface); border: 1px solid var(--border);">
-														<div class="text-[8px] font-medium truncate" style="color: var(--fg);">{block.course.courseCode.split('-')[0]}</div>
-														<div class="text-[7px] truncate" style="color: var(--muted);">{block.course.courseName}</div>
+														style="top: {top}%; height: {h}px; min-height: 24px; background: rgba(17,17,17,0.75); border: 1px solid var(--border);">
+														<div class="text-[10px] font-medium truncate" style="color: var(--fg);">{block.course.courseCode.split('-')[0]}</div>
+														<div class="text-[9px] truncate" style="color: var(--muted);">{block.course.courseName}</div>
 														{#if h > 32}
-															<div class="text-[6px] truncate" style="color: var(--muted);">{block.course.room} • {block.course.faculty}</div>
+															<div class="text-[8px] truncate" style="color: var(--muted);">{block.course.room} • {block.course.faculty}</div>
 														{/if}
 													</div>
 												{/each}
@@ -1030,12 +1045,12 @@
 						<p class="text-[9px] uppercase tracking-[0.1em]" style="color: var(--muted);">{totalStudents} submitted</p>
 					</div>
 					<div class="flex gap-3 mt-2 md:mt-0">
-						<button onclick={toggleLockAll}
-							class="cursor-pointer border px-3 py-2 text-[9px] uppercase tracking-[0.12em] transition-all duration-200"
+						<button onclick={toggleLockAll} disabled={lockSubmitting}
+							class="cursor-pointer border px-3 py-2 text-[9px] uppercase tracking-[0.12em] transition-all duration-200 disabled:opacity-50 disabled:cursor-not-allowed"
 							style="background: transparent; border-color: {locked ? '#e44' : 'var(--border)'}; color: {locked ? '#e44' : 'var(--muted)'};"
-							onmouseenter={(e) => { e.currentTarget.style.color = 'var(--accent)'; }}
+							onmouseenter={(e) => { if (!lockSubmitting) e.currentTarget.style.color = 'var(--accent)'; }}
 							onmouseleave={(e) => { e.currentTarget.style.color = locked ? '#e44' : 'var(--muted)'; }}
-						>{locked ? 'unlock editing' : 'lock preferences'}</button>
+						>{lockSubmitting ? (locked ? 'unlocking...' : 'locking...') : (locked ? 'unlock editing' : 'lock preferences')}</button>
 					</div>
 				</div>
 
@@ -1240,18 +1255,31 @@
 													{@const top = ((block.startMin - hStart) / 60) * CELL_H}
 													{@const h = ((block.endMin - block.startMin) / 60) * CELL_H}
 													{@const level = block.isUWE ? getTrafficLight(block.course.courseCode.split('-')[0]) : null}
+													{@const uweKey = block.day + '|' + block.startMin + '|' + block.endMin}
+													{@const uweGroup = block.isUWE ? calendarBlocks().filter(b2 => b2.isUWE && b2.day === block.day && b2.startMin === block.startMin && b2.endMin === block.endMin) : []}
+													{@const uweIdx = block.isUWE ? uweGroup.findIndex(b2 => b2.course.courseCode === block.course.courseCode) : 0}
+													{@const activeUweIdx = uweGroupActive.get(uweKey) ?? 0}
+													{#if !block.isUWE || uweIdx === activeUweIdx}
 													<div role="button" tabindex="0"
-														class="absolute left-0.5 right-0.5 overflow-hidden px-1 py-0.5 {block.isUWE ? 'cursor-default' : 'cursor-grab active:cursor-grabbing'}"
-														style="top: {top}px; height: {h}px; min-height: 20px; background: {block.isUWE ? 'rgba(255,255,255,0.04)' : 'var(--surface)'}; border: 1px solid {block.isUWE && level ? tColors[level] + '66' : 'var(--border)'}; z-index: 2; {block.isUWE ? 'border-left: 3px solid ' + (level ? tColors[level] : 'var(--border)') + ';' : ''}"
-														draggable={!block.isUWE} ondragstart={(e) => { if (!block.isUWE) onDragStart(e, block.course, block.originalDay, block.isUWE); }}>
-														<div class="text-[8px] font-medium truncate" style="color: {block.isUWE ? (level ? tColors[level] : 'var(--fg)') : 'var(--fg)'};">{block.course.courseCode.split('-')[0]}</div>
-														<div class="text-[7px] truncate" style="color: var(--muted);">{block.course.courseName}</div>
+														class="absolute right-0.5 overflow-hidden px-1 py-0.5 {block.isUWE && uweGroup.length > 1 ? 'cursor-pointer left-0' : block.isUWE ? 'cursor-default pointer-events-none left-0' : 'cursor-grab active:cursor-grabbing left-0.5'}"
+														style="top: {top}px; height: {h}px; min-height: 20px; background: {block.isUWE ? 'rgba(255,255,255,0.04)' : 'rgba(17,17,17,0.75)'}; border: 1px solid {block.isUWE && level ? tColors[level] + '66' : 'var(--border)'}; z-index: {block.isUWE ? 1 : 2}; {block.isUWE ? 'border-left: 3px solid ' + (level ? tColors[level] : 'var(--border)') + ';' : ''}"
+														draggable={!block.isUWE}
+														ondragstart={(e) => { if (!block.isUWE) onDragStart(e, block.course, block.originalDay, block.isUWE); }}
+														onclick={(e) => { if (block.isUWE && uweGroup.length > 1) cycleUwe(uweKey, uweGroup.length, e); }}>
+														{#if block.isUWE && uweGroup.length > 1}
+															<div style="position: absolute; top: 2px; right: 2px; background: {level ? tColors[level] : 'var(--muted)'}; color: #000; border-radius: 3px; padding: 0 3px; font-size: 7px; font-weight: 700; line-height: 12px; letter-spacing: 0.03em; pointer-events: none;">
+																{activeUweIdx + 1}/{uweGroup.length}
+															</div>
+														{/if}
+														<div class="text-[10px] font-medium truncate" style="color: {block.isUWE ? (level ? tColors[level] : 'var(--fg)') : 'var(--fg)'}; padding-right: {block.isUWE && uweGroup.length > 1 ? '18px' : '0'};">{block.course.courseCode.split('-')[0]}</div>
+														<div class="text-[9px] truncate" style="color: var(--muted);">{block.course.courseName}</div>
 														{#if h > 32}
-															<div class="text-[6px] truncate" style="color: var(--muted);">
+															<div class="text-[8px] truncate" style="color: var(--muted);">
 																{block.course.component ?? ''}{block.course.room ? ' • ' + block.course.room : ''}{block.course.faculty ? ' • ' + block.course.faculty : ''}
 															</div>
 														{/if}
 													</div>
+													{/if}
 												{/each}
 											<!-- Ghost blocks (original positions of moved courses) -->
 											{#if showOriginals}
@@ -1455,3 +1483,10 @@
 		</div>
 	{/if}
 </div>
+
+<footer class="py-4 text-center text-[9px] uppercase tracking-[0.12em]" style="color: var(--muted); background: var(--bg);">
+	built and maintained by <a href="https://github.com/rohitjg13" target="_blank" rel="noopener noreferrer" style="color: var(--muted); text-decoration: underline; text-underline-offset: 3px; transition: color 0.15s;"
+		onmouseenter={(e) => { (e.currentTarget as HTMLAnchorElement).style.color = 'var(--accent)'; }}
+		onmouseleave={(e) => { (e.currentTarget as HTMLAnchorElement).style.color = 'var(--muted)'; }}
+	>rohit j g</a>
+</footer>
