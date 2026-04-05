@@ -1,42 +1,89 @@
-# sv
+# noodle
 
-Everything you need to build a Svelte project, powered by [`sv`](https://github.com/sveltejs/cli).
+A timetable and course preference management system for colleges. Students pick their electives, class reps manage the schedule, and everyone sees conflicts in real time.
 
-## Creating a project
+---
 
-If you're seeing this, you've probably already done this step. Congrats!
+## What it does
 
-```sh
-# create a new project
-npx sv create my-app
+Colleges typically have a core timetable plus elective/UWE slots that students need to choose from. Noodle handles the full flow:
+
+**Students** pick a minor program and rank their preferred UWE (elective) courses. The system shows them a personal timetable and flags conflicts between their selections and core courses in real time (green/yellow/red).
+
+**Class Representatives (CRs)** get a demand view showing how many students want each UWE, a visual timetable editor to drag and reschedule courses so they suggest minor changes to the profs, and a notification system that alerts them when another CR makes a change that affects their batch.
+
+**Super Admins** manage which users are CRs for which batches, upload the master timetable as an XLSX file, and view demand across all students.
+
+---
+
+## Tech stack
+
+- **SvelteKit** — full-stack framework (frontend + API routes)
+- **Svelte 5** with runes mode
+- **Tailwind CSS v4**
+- **PostgreSQL** via **Drizzle ORM** (self-hosted)
+- **Better Auth** — authentication with Google OAuth
+- **TypeScript** throughout
+
+---
+
+## Setup
+
+### 1. Clone and install
+
+```bash
+git clone <repo-url>
+cd noodle
+npm install
 ```
 
-To recreate this project with the same configuration:
+### 2. Environment variables
 
-```sh
-# recreate this project
-npx sv@0.13.1 create --template minimal --types ts --add tailwindcss="plugins:none" drizzle="database:postgresql+postgresql:postgres.js+docker:no" better-auth="demo:none" --no-download-check --no-install .
+Create a `.env` file:
+
+```env
+DATABASE_URL="postgres://user:password@host:port/db-name"
+ORIGIN=""                # Base URL, e.g. http://localhost:5173
+BETTER_AUTH_SECRET=""    # Random 32+ character string
+GOOGLE_CLIENT_ID=""
+GOOGLE_CLIENT_SECRET=""
 ```
 
-## Developing
+### 3. Push the database schema
 
-Once you've created a project and installed dependencies with `npm install` (or `pnpm install` or `yarn`), start a development server:
+```bash
+npm run db:push
+```
 
-```sh
+### 4. Add the timetable
+
+Drop your timetable XLSX file into `src/lib/data/`. The admin page will sync batches from it automatically on load.
+
+### 5. Run
+
+```bash
 npm run dev
-
-# or start the server and open the app in a new browser tab
-npm run dev -- --open
 ```
 
-## Building
+---
 
-To create a production version of your app:
+## Database commands
 
-```sh
-npm run build
-```
+| Command | Description |
+|---|---|
+| `npm run db:push` | Push schema changes to the database |
+| `npm run db:generate` | Generate migration files |
+| `npm run db:studio` | Open Drizzle Studio (visual DB editor) |
+| `npm run auth:schema` | Regenerate Better Auth tables |
 
-You can preview the production build with `npm run preview`.
+---
 
-> To deploy your app, you may need to install an [adapter](https://svelte.dev/docs/kit/adapters) for your target environment.
+## Roles
+
+| Role | Access |
+|---|---|
+| `student` | View timetable, submit and lock preferences |
+| `cr` | Everything above + manage schedule for assigned batches |
+| `super_admin` | Everything + manage CR assignments, view all demand |
+
+User roles are set directly in the `user` table.
