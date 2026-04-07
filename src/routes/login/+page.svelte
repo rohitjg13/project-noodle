@@ -51,3 +51,10 @@
 		</p>
 	</div>
 </div>
+
+<footer class="fixed bottom-0 left-0 right-0 py-4 text-center text-[9px] uppercase tracking-[0.12em]" style="color: var(--muted); background: transparent; z-index: 20;">
+	built and maintained by <a href="https://github.com/rohitjg13" target="_blank" rel="noopener noreferrer" style="color: var(--muted); text-decoration: underline; text-underline-offset: 3px; transition: color 0.15s;"
+		onmouseenter={(e) => { (e.currentTarget as HTMLAnchorElement).style.color = 'var(--accent)'; }}
+		onmouseleave={(e) => { (e.currentTarget as HTMLAnchorElement).style.color = 'var(--muted)'; }}
+	>rohit j g</a>
+</footer>

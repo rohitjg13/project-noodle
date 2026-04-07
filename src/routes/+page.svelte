@@ -440,6 +440,9 @@
 			const r = await fetch('/api/cr/schedule');
 			if (!r.ok) return;
 			const d = await r.json();
+			// Don't overwrite an in-flight optimistic update — the save will either
+			// commit (and re-poll will pick it up) or roll back on its own.
+			if (syncStatus === 'saving') return;
 			scheduleOverrides = buildOverrideMapFromArray(d.blocks ?? []);
 			lastSyncedAt = Date.now();
 		} catch { /* ignore */ }
@@ -793,9 +796,9 @@
 			<span class="hidden text-[10px] tracking-wide md:inline" style="color: var(--muted);">{data.user.email}</span>
 			<button onclick={signOut}
 				class="cursor-pointer border-none bg-transparent text-[10px] uppercase tracking-[0.12em] transition-colors duration-200"
-				style="color: var(--muted);"
+				style="color: var(--fg);"
 				onmouseenter={(e) => { e.currentTarget.style.color = 'var(--accent)'; }}
-				onmouseleave={(e) => { e.currentTarget.style.color = 'var(--border)'; }}
+				onmouseleave={(e) => { e.currentTarget.style.color = 'var(--fg)'; }}
 			>sign out</button>
 		</div>
 	</header>
@@ -1290,7 +1293,7 @@
 							>reset positions</button>
 						{/if}
 						<!-- Sync status -->
-						<span class="text-[9px] uppercase tracking-[0.12em] text-right" style="min-width: 5.5rem; color: {syncStatus === 'saving' ? 'var(--muted)' : syncStatus === 'saved' ? '#4e4' : syncStatus === 'error' ? '#e44' : 'var(--border)'};">
+						<span class="text-[9px] uppercase tracking-[0.12em] text-right" style="min-width: 5.5rem; color: {syncStatus === 'saving' ? 'var(--muted)' : syncStatus === 'saved' ? '#4e4' : syncStatus === 'error' ? '#e44' : 'var(--fg)'};">
 							{#if syncStatus === 'saving'}saving…{:else if syncStatus === 'saved'}synced ✓{:else if syncStatus === 'error'}sync failed{:else if lastSyncedAt > 0}live{/if}
 						</span>
 					</div>
