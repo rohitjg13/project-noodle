@@ -5,17 +5,16 @@ import { notification, crAssignment, batch, studentPreference } from '$lib/serve
 import { eq, or, and, ilike, ne, inArray } from 'drizzle-orm';
 
 // POST /api/cr/notify — notify other CRs about a moved class.
-// Body: { courseCode, major, includeDemand }
-// - Co-managing CRs (assigned to one of the moved course's batches) are always notified.
-// - CRs whose batch students have the course in UWE demand are notified only when
-//   includeDemand is true (the mover confirmed the top-5 warning modal).
+// Body: { courseCode, major }
+// - Co-managing CRs (assigned to one of the moved course's batches) are notified.
+// - CRs whose batch students have the course in their UWE demand are notified.
 export const POST: RequestHandler = async ({ locals, request }) => {
 	if (!locals.user) return json({ error: 'Unauthorized' }, { status: 401 });
 	if (locals.user.role !== 'cr' && locals.user.role !== 'super_admin') {
 		return json({ error: 'Forbidden' }, { status: 403 });
 	}
 
-	const { courseCode, major, includeDemand } = await request.json();
+	const { courseCode, major } = await request.json();
 	if (!courseCode) return json({ error: 'Missing courseCode' }, { status: 400 });
 
 	// All CR assignments excluding the mover
@@ -34,9 +33,10 @@ export const POST: RequestHandler = async ({ locals, request }) => {
 		if (majorTokens.has(a.batchName.toUpperCase())) coManagers.add(a.userId);
 	}
 
-	// Demand-affected CRs: batches of students with this course in their UWE preferences
+	// Demand-affected CRs: batches of students with this course in their UWE preferences.
+	// Always evaluated so any CR whose batch demands the course is notified on every move.
 	const demandCRs = new Set<string>();
-	if (includeDemand) {
+	{
 		const interestedStudents = await db
 			.select({ batch: studentPreference.batch })
 			.from(studentPreference)

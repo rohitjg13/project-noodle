@@ -855,7 +855,7 @@
 		if (!moveWarnModal) return;
 		const { course, origDay, day, newStart, newEnd } = moveWarnModal.pending;
 		moveWarnModal = null;
-		await applyDrop(course, origDay, day, newStart, newEnd, true);
+		await applyDrop(course, origDay, day, newStart, newEnd);
 	}
 
 	async function dismissNotification(id: string) {
@@ -889,7 +889,7 @@
 		scheduleOverrides = m;
 	}
 
-	async function applyDrop(course: Course, origDay: string, day: string, newStart: string, newEnd: string, wasWarned = false) {
+	async function applyDrop(course: Course, origDay: string, day: string, newStart: string, newEnd: string) {
 		const overrideKey = `${course.courseCode}|${course.component ?? ''}|${origDay}`;
 		const prevOverride = scheduleOverrides.get(overrideKey);
 		const after: MovePos = { day, startTime: newStart, endTime: newEnd };
@@ -910,11 +910,11 @@
 				lastSyncedAt = Date.now();
 				syncStatus = 'saved';
 				setTimeout(() => (syncStatus = 'idle'), 2500);
-				// Notify co-managing CRs; include demand-based CRs when the top-5 warning was confirmed
+				// Notify co-managing CRs and any CR whose batch demands this course as a UWE
 				fetch('/api/cr/notify', {
 					method: 'POST',
 					headers: { 'Content-Type': 'application/json' },
-					body: JSON.stringify({ courseCode: course.courseCode.split('-')[0], major: course.major, includeDemand: wasWarned })
+					body: JSON.stringify({ courseCode: course.courseCode.split('-')[0], major: course.major })
 				});
 			} else {
 				setOverride(overrideKey, prevOverride ?? null);
