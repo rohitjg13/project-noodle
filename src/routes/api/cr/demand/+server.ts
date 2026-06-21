@@ -59,5 +59,14 @@ export const GET: RequestHandler = async ({ locals }) => {
 		}))
 		.sort((a, b) => b.priorityScore - a.priorityScore);
 
-	return json({ demand, totalStudents: allPrefs.length });
+	// Minor demand: count of students per selected minor (same batch scoping as UWE demand)
+	const minorMap = new Map<string, number>();
+	for (const pref of allPrefs) {
+		if (pref.minor) minorMap.set(pref.minor, (minorMap.get(pref.minor) ?? 0) + 1);
+	}
+	const minorDemand = Array.from(minorMap.entries())
+		.map(([minor, count]) => ({ minor, count }))
+		.sort((a, b) => b.count - a.count);
+
+	return json({ demand, minorDemand, totalStudents: allPrefs.length });
 };

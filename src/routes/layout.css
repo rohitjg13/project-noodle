@@ -8,6 +8,24 @@
 	--border: #222;
 	--surface: #111;
 	--accent: #fff;
+	/* Block/overlay surfaces that flip with the theme */
+	--block: rgba(17, 17, 17, 0.75);
+	--tint: rgba(255, 255, 255, 0.03);
+	--tint-strong: rgba(255, 255, 255, 0.05);
+	color-scheme: dark;
+}
+
+:root[data-theme='light'] {
+	--bg: #faf9f7;
+	--fg: #1c1c1c;
+	--muted: #6b6b6b;
+	--border: #e2ddd5;
+	--surface: #ffffff;
+	--accent: #111111;
+	--block: rgba(255, 255, 255, 0.92);
+	--tint: rgba(0, 0, 0, 0.04);
+	--tint-strong: rgba(0, 0, 0, 0.06);
+	color-scheme: light;
 }
 
 @theme {

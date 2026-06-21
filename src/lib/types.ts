@@ -138,6 +138,32 @@ export function getConflictLevel(
 	return 'green';
 }
 
+// Counting variant of getConflictLevel — same overlap rules, but tallies every
+// overlapping core instead of returning at the first hit. Yellow = tutorial overlap
+// (fixable by moving one class), red = lecture overlap.
+export function countConflicts(
+	uweCourse: Course,
+	coreCourses: Course[]
+): { red: number; yellow: number } {
+	const counts = { red: 0, yellow: 0 };
+	const uweDays = parseDays(uweCourse.day || '');
+	if (uweDays.length === 0 || !uweCourse.startTime || !uweCourse.endTime) return counts;
+
+	for (const core of coreCourses) {
+		if (!core.day || !core.startTime || !core.endTime) continue;
+		const coreDays = parseDays(core.day);
+		const commonDays = uweDays.filter((d) => coreDays.includes(d));
+		if (commonDays.length === 0) continue;
+
+		if (timesOverlap(uweCourse.startTime, uweCourse.endTime, core.startTime, core.endTime)) {
+			const coreComp = (core.component || core.slot || '').toUpperCase();
+			if (coreComp.startsWith('TUT')) counts.yellow++;
+			else counts.red++;
+		}
+	}
+	return counts;
+}
+
 // Priority score calculation
 export function calculatePriorityScore(p1: number, p2: number, p3: number): number {
 	return p1 * 3 + p2 * 2 + p3 * 1;

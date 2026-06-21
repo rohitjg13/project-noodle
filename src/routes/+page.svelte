@@ -2,7 +2,7 @@
 	import { authClient } from '$lib/auth-client';
 	import { browser } from '$app/environment';
 	import type { Course, ConflictLevel } from '$lib/types';
-	import { parseDays, timeToMinutes, minutesToTime, getConflictLevel } from '$lib/types';
+	import { parseDays, timeToMinutes, minutesToTime, getConflictLevel, countConflicts } from '$lib/types';
 
 	let { data } = $props();
 
@@ -31,6 +31,7 @@
 	let uwePref1 = $state(data.preference?.uwePref1 ?? '');
 	let uwePref2 = $state(data.preference?.uwePref2 ?? '');
 	let uwePref3 = $state(data.preference?.uwePref3 ?? '');
+	let minorOnly = $state(!!data.preference?.minor && !data.preference?.uwePref1 && !data.preference?.uwePref2 && !data.preference?.uwePref3);
 	let locked = $state(data.preference?.locked ?? false);
 	let submitting = $state(false);
 	let batchSubmitting = $state(false);
@@ -39,11 +40,12 @@
 
 	// CR state
 	let demand = $state<{ courseCode: string; p1: number; p2: number; p3: number; total: number; priorityScore: number }[]>([]);
+	let minorDemand = $state<{ minor: string; count: number }[]>([]);
 	let constraints = $state<{ id: number; professorName: string; day: string; startTime: string | null; endTime: string | null; allDay: boolean; reason?: string | null }[]>([]);
 	let totalStudents = $state(0);
 	let deptFilter = $state('');
-	let demandSort = $state<'score' | 'total'>('score');
-	let demandSortDir = $state<'desc' | 'asc'>('desc');
+	let demandSort = $state<'conflict' | 'score' | 'total'>('conflict');
+	let demandSortDir = $state<'desc' | 'asc'>('asc'); // default: least conflict first
 	let loadingCR = $state(true);
 
 	// Notifications
@@ -84,20 +86,69 @@
 	let showOriginals = $state(false);
 	let syncStatus = $state<'idle' | 'saving' | 'saved' | 'error' | 'polling'>('idle');
 	let lastSyncedAt = $state(0);
+	// Undo/redo history for moves — session-only, max 3 entries. Entries store absolute
+	// positions (not map refs) so they survive the polling rebuild of scheduleOverrides.
+	type MovePos = { day: string; startTime: string; endTime: string };
+	type MoveEntry = { key: string; course: Course; origDay: string; before: MovePos | null; after: MovePos };
+	let undoStack = $state<MoveEntry[]>([]);
+	let redoStack = $state<MoveEntry[]>([]);
 	// Time range extension (in whole hours, relative to auto-detected range)
 	let extraHoursBefore = $state(0);
 	let extraHoursAfter = $state(1); // start with 1hr extra at the end
 	let toast = $state('');
 	let toastTimeout: ReturnType<typeof setTimeout>;
 
+	// Theme (dark default, persisted in localStorage; initial attribute is set in app.html)
+	let theme = $state<'dark' | 'light'>('dark');
+	$effect(() => {
+		theme = document.documentElement.getAttribute('data-theme') === 'light' ? 'light' : 'dark';
+	});
+	function toggleTheme() {
+		theme = theme === 'light' ? 'dark' : 'light';
+		document.documentElement.setAttribute('data-theme', theme);
+		try { localStorage.setItem('theme', theme); } catch { /* ignore */ }
+	}
+
 	// Constraint form
 	let profName = $state('');
+	let profSuggestOpen = $state(false);
 	let constraintDay = $state('Monday');
 	let allDay = $state(false);
 	let cStartTime = $state('09:00');
 	let cEndTime = $state('17:00');
 	let cReason = $state('');
 	let savingConstraint = $state(false);
+
+	// Professor picker — names + their course codes from the XLSX faculty column.
+	// Faculty cells can hold "Name[1234567]" id suffixes and comma-separated multiple profs.
+	function normalizeFaculty(raw: string): string[] {
+		return raw.split(',').map((p) => p.replace(/\[[^\]]*\]/g, '').trim()).filter(Boolean);
+	}
+	let professorOptions = $derived(() => {
+		const map = new Map<string, { name: string; codes: Set<string> }>();
+		for (const c of courses) {
+			if (!c.faculty) continue;
+			const base = c.courseCode.split('-')[0];
+			for (const name of normalizeFaculty(c.faculty)) {
+				const key = name.toUpperCase();
+				const entry = map.get(key) ?? { name, codes: new Set<string>() };
+				entry.codes.add(base);
+				map.set(key, entry);
+			}
+		}
+		return [...map.values()]
+			.map((e) => ({ name: e.name, codes: [...e.codes].sort() }))
+			.sort((a, b) => a.name.localeCompare(b.name));
+	});
+	let profSuggestions = $derived(() => {
+		if (!profSuggestOpen) return [];
+		const q = profName.trim().toUpperCase();
+		const opts = professorOptions();
+		const matches = q
+			? opts.filter((p) => p.name.toUpperCase().includes(q) || p.codes.some((c) => c.toUpperCase().includes(q)))
+			: opts;
+		return matches.slice(0, 12);
+	});
 
 	function showToast(msg: string) {
 		toast = msg;
@@ -199,18 +250,38 @@
 		return crBatchNames.some((bn: string) => majors.some((m: string) => m === bn));
 	}
 
+	// All scheduled rows of a UWE course (its LEC + TUT + PRAC components, and every day
+	// each meets), matched by base code and deduped by component+day+time. A student
+	// attends ALL of these, so the course's conflict is the WORST across every row —
+	// never the best. (The component is part of the full courseCode, e.g.
+	// "ART210/AMP1001-LEC1"; the base is the part before the first "-".)
+	function uweBaseRows(baseCode: string): Course[] {
+		const rows: Course[] = [];
+		const seen = new Set<string>();
+		for (const c of uweCourses) {
+			if (c.courseCode.split('-')[0] !== baseCode) continue;
+			const sig = `${c.component ?? ''}|${c.day}|${c.startTime}`;
+			if (seen.has(sig)) continue;
+			seen.add(sig);
+			rows.push(c);
+		}
+		return rows;
+	}
+
 	function getTrafficLight(courseCode: string): ConflictLevel {
 		// For CRs, check against their batch's timetable; for students, all core courses
 		const cores = canManage ? crBatchCourses() : coreCourses;
-		const variants = uweCourses.filter((c) => c.courseCode.startsWith(courseCode));
-		if (!variants.length) return 'green';
-		let best: ConflictLevel = 'red';
-		for (const v of variants) {
-			const level = getConflictLevel(v, cores);
-			if (level === 'green') return 'green';
-			if (level === 'yellow') best = 'yellow';
+		const rows = uweBaseRows(courseCode);
+		if (!rows.length) return 'green';
+		// Worst conflict across every component/row of the course (don't clash with self)
+		const relevant = cores.filter((k) => k.courseCode.split('-')[0] !== courseCode);
+		let level: ConflictLevel = 'green';
+		for (const v of rows) {
+			const l = getConflictLevel(v, relevant);
+			if (l === 'red') return 'red';
+			if (l === 'yellow') level = 'yellow';
 		}
-		return best;
+		return level;
 	}
 
 	// Adjusted traffic light map — recomputes reactively when scheduleOverrides changes
@@ -233,25 +304,58 @@
 		for (const item of demand) {
 			const orig = getTrafficLight(item.courseCode);
 			if (orig === 'green') continue; // already fine, skip
-			const variants = uweCourses.filter((c) => c.courseCode.startsWith(item.courseCode));
-			let best: ConflictLevel = 'red';
-			for (const v of variants) {
-				const origDays = parseDays(v.day || '');
-				if (!origDays.length || !v.startTime || !v.endTime) { best = 'green'; break; }
-				let variantLevel: ConflictLevel = 'green';
-				for (const origDay of origDays) {
-					const override = scheduleOverrides.get(`${v.courseCode}|${v.component ?? ''}|${origDay}`);
-					const synth = override
-						? { ...v, day: override.day, startTime: override.startTime, endTime: override.endTime }
-						: { ...v, day: origDay };
-					const slotLevel = getConflictLevel(synth, adjustedCores);
-					if (slotLevel === 'red') { variantLevel = 'red'; break; }
-					if (slotLevel === 'yellow') variantLevel = 'yellow';
+			// Worst conflict across every component/row/day-slot, with overrides applied
+			const relevant = adjustedCores.filter((k) => k.courseCode.split('-')[0] !== item.courseCode);
+			let level: ConflictLevel = 'green';
+			outer: for (const v of uweBaseRows(item.courseCode)) {
+				for (const slot of adjustedSlotsOf(v)) {
+					const slotLevel = getConflictLevel(slot, relevant);
+					if (slotLevel === 'red') { level = 'red'; break outer; }
+					if (slotLevel === 'yellow') level = 'yellow';
 				}
-				if (variantLevel === 'green') { best = 'green'; break; }
-				if (variantLevel === 'yellow') best = 'yellow';
 			}
-			map.set(item.courseCode, best);
+			map.set(item.courseCode, level);
+		}
+		return map;
+	});
+
+	// Expand a course into one entry per day, with schedule overrides applied
+	function adjustedSlotsOf(c: Course): Course[] {
+		const slots: Course[] = [];
+		for (const origDay of parseDays(c.day || '')) {
+			const override = scheduleOverrides.get(`${c.courseCode}|${c.component ?? ''}|${origDay}`);
+			slots.push(override ? { ...c, day: override.day, startTime: override.startTime, endTime: override.endTime } : { ...c, day: origDay });
+		}
+		return slots;
+	}
+
+	// All CR-batch courses (across every assigned batch, deduped) with overrides applied,
+	// expanded one entry per day-slot. Spanning all batches is how multiple batches are
+	// taken into consideration; dedup avoids counting a class shared by two batches twice.
+	let adjustedCrCores = $derived(() => {
+		const out: Course[] = [];
+		for (const c of crBatchCourses()) out.push(...adjustedSlotsOf(c));
+		return out;
+	});
+
+	// Conflict counts per demanded UWE: red/yellow overlaps summed over EVERY component,
+	// row and day-slot of the course against the CR's (override-adjusted) batch timetable.
+	// A student attends all components, so every overlap counts — none are masked.
+	let demandConflicts = $derived(() => {
+		const map = new Map<string, { red: number; yellow: number; score: number }>();
+		if (!canManage) return map;
+		const cores = adjustedCrCores();
+		for (const item of demand) {
+			const relevant = cores.filter((k) => k.courseCode.split('-')[0] !== item.courseCode);
+			let red = 0, yellow = 0;
+			for (const v of uweBaseRows(item.courseCode)) {
+				for (const slot of adjustedSlotsOf(v)) {
+					const counts = countConflicts(slot, relevant);
+					red += counts.red;
+					yellow += counts.yellow;
+				}
+			}
+			map.set(item.courseCode, { red, yellow, score: red * 2 + yellow });
 		}
 		return map;
 	});
@@ -326,15 +430,54 @@
 	let filteredDemand = $derived(() => {
 		let items = deptFilter ? demand.filter((d) => deptPrefix(d.courseCode) === deptFilter) : demand;
 		const dir = demandSortDir === 'asc' ? -1 : 1;
-		return [...items].sort((a, b) => dir * (demandSort === 'total' ? b.total - a.total : b.priorityScore - a.priorityScore));
+		return [...items].sort((a, b) => {
+			if (demandSort === 'conflict') {
+				const ca = demandConflicts().get(a.courseCode)?.score ?? 0;
+				const cb = demandConflicts().get(b.courseCode)?.score ?? 0;
+				if (ca !== cb) return dir * (cb - ca);
+				return b.priorityScore - a.priorityScore; // tie-break: most demanded first
+			}
+			return dir * (demandSort === 'total' ? b.total - a.total : b.priorityScore - a.priorityScore);
+		});
 	});
 
-	let topDemandedUWEs = $derived(demand.slice(0, 3).map((d) => d.courseCode));
-	let restDemandedUWEs = $derived(demand.slice(3));
+	// Ordering for the timetable tab's UWE overlay section: by raw demand or by least conflict
+	let topUweMode = $state<'demand' | 'conflict'>('conflict');
+	let rankedDemand = $derived(() => {
+		if (topUweMode === 'demand') return demand;
+		return [...demand].sort((a, b) => {
+			const ca = demandConflicts().get(a.courseCode)?.score ?? 0;
+			const cb = demandConflicts().get(b.courseCode)?.score ?? 0;
+			if (ca !== cb) return ca - cb;
+			return b.priorityScore - a.priorityScore;
+		});
+	});
+	let topDemandedUWEs = $derived(rankedDemand().slice(0, 3).map((d) => d.courseCode));
+	// "Other demanded UWEs" list sort: by course code (groups by dept), demand, or least conflict
+	let restUweSort = $state<'course' | 'demand' | 'conflict'>('course');
+	let restDemandedUWEs = $derived(() => {
+		const rest = [...rankedDemand().slice(3)];
+		if (restUweSort === 'course') return rest.sort((a, b) => a.courseCode.localeCompare(b.courseCode));
+		if (restUweSort === 'conflict') return rest.sort((a, b) => {
+			const ca = demandConflicts().get(a.courseCode)?.score ?? 0;
+			const cb = demandConflicts().get(b.courseCode)?.score ?? 0;
+			if (ca !== cb) return ca - cb;
+			return b.priorityScore - a.priorityScore;
+		});
+		return rest.sort((a, b) => b.priorityScore - a.priorityScore);
+	});
 
-	// Initialize top 3 UWEs as enabled once demand loads
+	function setTopUweMode(mode: 'demand' | 'conflict') {
+		if (topUweMode === mode) return;
+		topUweMode = mode;
+		// Re-seed the overlay with the new top 3
+		enabledUWEs = new Set(rankedDemand().slice(0, 3).map((d) => d.courseCode));
+	}
+
+	// Initialize top 3 UWEs as enabled once demand AND courses load
+	// (conflict scores need course data, so seeding early would use demand order)
 	$effect(() => {
-		if (topDemandedUWEs.length > 0 && enabledUWEs.size === 0) {
+		if (topDemandedUWEs.length > 0 && courses.length > 0 && enabledUWEs.size === 0) {
 			enabledUWEs = new Set(topDemandedUWEs);
 		}
 	});
@@ -395,6 +538,14 @@
 		return blocks;
 	});
 
+	// Dept filter for the CR timetable grid (separate from the demand tab's deptFilter)
+	let ttDeptFilter = $state('');
+	let ttDepts = $derived([...new Set(crBatchCourses().map((c) => deptPrefix(c.courseCode)))].sort());
+	let filteredCalendarBlocks = $derived(() =>
+		ttDeptFilter ? calendarBlocks().filter((b) => deptPrefix(b.course.courseCode) === ttDeptFilter) : calendarBlocks()
+	);
+
+	// Time range stays based on unfiltered blocks so the axis doesn't jump when filtering
 	let minT = $derived(Math.min(...(calendarBlocks().map((b) => b.startMin).length ? calendarBlocks().map((b) => b.startMin) : [480])));
 	let maxT = $derived(Math.max(...(calendarBlocks().map((b) => b.endMin).length ? calendarBlocks().map((b) => b.endMin) : [1080])));
 	let rMin = $derived(Math.floor(minT / 60) * 60);
@@ -405,13 +556,18 @@
 	let totalMin = $derived(tDispMax - tDispMin);
 	let timeLabels = $derived(Array.from({ length: Math.floor(totalMin / 60) + 1 }, (_, i) => ({ mins: tDispMin + i * 60, label: minutesToTime(tDispMin + i * 60) })));
 
-	function isConstrained(day: string, startMin: number, endMin: number): string | null {
+	// A block violates a constraint when its own professor is flagged unavailable on the same
+	// day and time. Faculty cells may list multiple profs with bracketed IDs, so normalize first.
+	function blockConstraintViolation(course: Course, day: string, startMin: number, endMin: number): string | null {
+		const profs = normalizeFaculty(course.faculty || '').map((p) => p.toUpperCase());
+		if (!profs.length) return null;
 		for (const c of constraints) {
 			if (c.day !== day) continue;
-			if (c.allDay) return `Prof. ${c.professorName} unavailable`;
+			if (!profs.includes(c.professorName.toUpperCase())) continue;
+			if (c.allDay) return c.professorName;
 			if (c.startTime && c.endTime) {
 				const cs = timeToMinutes(c.startTime), ce = timeToMinutes(c.endTime);
-				if (startMin < ce && cs < endMin) return `Prof. ${c.professorName} unavailable`;
+				if (startMin < ce && cs < endMin) return c.professorName;
 			}
 		}
 		return null;
@@ -426,6 +582,7 @@
 				fetch('/api/cr/constraints').then((r) => r.json())
 			]).then(([d, c]) => {
 				demand = d.demand ?? [];
+				minorDemand = d.minorDemand ?? [];
 				totalStudents = d.totalStudents ?? 0;
 				constraints = c.constraints ?? [];
 			}).catch(() => {}).finally(() => (loadingCR = false));
@@ -481,7 +638,9 @@
 		prefError = '';
 		prefSuccess = '';
 		if (!studentBatch) { prefError = 'Set your batch first'; return; }
-		if (!uwePref1) { prefError = 'At least your first UWE preference is required'; return; }
+		if (minorOnly) {
+			if (!minor) { prefError = 'Select a minor or uncheck minor-only'; return; }
+		} else if (!uwePref1) { prefError = 'At least your first UWE preference is required'; return; }
 		const choices = [uwePref1, uwePref2, uwePref3].filter(Boolean);
 		if (new Set(choices).size !== choices.length) { prefError = 'No duplicate UWE preferences'; return; }
 
@@ -614,8 +773,8 @@
 		const dropMin = snapMin(hStart + (topY / CELL_H) * 60);
 
 		const dur = timeToMinutes(course.endTime || '') - timeToMinutes(course.startTime || '');
-		const msg = isConstrained(day, dropMin, dropMin + dur);
-		if (msg) { showToast(msg); return; }
+		const blockedBy = blockConstraintViolation(course, day, dropMin, dropMin + dur);
+		if (blockedBy) { showToast(`Prof. ${blockedBy} is unavailable then`); return; }
 
 		const newStart = minutesToTime(dropMin);
 		const newEnd = minutesToTime(dropMin + dur);
@@ -664,8 +823,8 @@
 		dragOverSlot = null;
 		if (!dragCourse) return;
 		const dur = timeToMinutes(dragCourse.endTime || '') - timeToMinutes(dragCourse.startTime || '');
-		const msg = isConstrained(day, dropMin, dropMin + dur);
-		if (msg) { showToast(msg); dragCourse = null; return; }
+		const blockedBy = blockConstraintViolation(dragCourse, day, dropMin, dropMin + dur);
+		if (blockedBy) { showToast(`Prof. ${blockedBy} is unavailable then`); dragCourse = null; return; }
 
 		const newStart = minutesToTime(dropMin);
 		const newEnd = minutesToTime(dropMin + dur);
@@ -695,15 +854,8 @@
 	async function confirmDrop() {
 		if (!moveWarnModal) return;
 		const { course, origDay, day, newStart, newEnd } = moveWarnModal.pending;
-		const courseCode = moveWarnModal.courseCode;
 		moveWarnModal = null;
-		await applyDrop(course, origDay, day, newStart, newEnd);
-		// Notify other CRs whose batch students have this course in their demand
-		fetch('/api/cr/notify', {
-			method: 'POST',
-			headers: { 'Content-Type': 'application/json' },
-			body: JSON.stringify({ courseCode })
-		});
+		await applyDrop(course, origDay, day, newStart, newEnd, true);
 	}
 
 	async function dismissNotification(id: string) {
@@ -715,46 +867,118 @@
 		});
 	}
 
-	async function applyDrop(course: Course, origDay: string, day: string, newStart: string, newEnd: string) {
+	function scheduleBody(course: Course, origDay: string, pos: MovePos) {
+		return {
+			courseCode: course.courseCode,
+			component: course.component ?? '',
+			originalDay: origDay,
+			batch: (course.major || '').toUpperCase().split(/[\s,]+/).find((m) => crBatchNames.includes(m)) ?? course.major,
+			day: pos.day,
+			startTime: pos.startTime,
+			endTime: pos.endTime,
+			courseName: course.courseName,
+			faculty: course.faculty,
+			room: course.room
+		};
+	}
+
+	function setOverride(key: string, pos: MovePos | null) {
+		const m = new Map(scheduleOverrides);
+		if (pos) m.set(key, pos);
+		else m.delete(key);
+		scheduleOverrides = m;
+	}
+
+	async function applyDrop(course: Course, origDay: string, day: string, newStart: string, newEnd: string, wasWarned = false) {
 		const overrideKey = `${course.courseCode}|${course.component ?? ''}|${origDay}`;
 		const prevOverride = scheduleOverrides.get(overrideKey);
+		const after: MovePos = { day, startTime: newStart, endTime: newEnd };
 
 		// Optimistic update — apply immediately so UI moves before API responds
-		scheduleOverrides = new Map(scheduleOverrides).set(overrideKey, { day, startTime: newStart, endTime: newEnd });
+		setOverride(overrideKey, after);
 
 		syncStatus = 'saving';
 		try {
 			const res = await fetch('/api/cr/schedule', {
 				method: 'POST',
 				headers: { 'Content-Type': 'application/json' },
-				body: JSON.stringify({
-					courseCode: course.courseCode,
-					component: course.component ?? '',
-					originalDay: origDay,
-					batch: (course.major || '').toUpperCase().split(/[\s,]+/).find((m) => crBatchNames.includes(m)) ?? course.major,
-					day,
-					startTime: newStart,
-					endTime: newEnd,
-					courseName: course.courseName,
-					faculty: course.faculty,
-					room: course.room
-				})
+				body: JSON.stringify(scheduleBody(course, origDay, after))
 			});
 			if (res.ok) {
+				undoStack = [...undoStack, { key: overrideKey, course, origDay, before: prevOverride ?? null, after }].slice(-3);
+				redoStack = [];
 				lastSyncedAt = Date.now();
 				syncStatus = 'saved';
 				setTimeout(() => (syncStatus = 'idle'), 2500);
+				// Notify co-managing CRs; include demand-based CRs when the top-5 warning was confirmed
+				fetch('/api/cr/notify', {
+					method: 'POST',
+					headers: { 'Content-Type': 'application/json' },
+					body: JSON.stringify({ courseCode: course.courseCode.split('-')[0], major: course.major, includeDemand: wasWarned })
+				});
 			} else {
-				// Rollback on failure
-				if (prevOverride) scheduleOverrides = new Map(scheduleOverrides).set(overrideKey, prevOverride);
-				else { const m = new Map(scheduleOverrides); m.delete(overrideKey); scheduleOverrides = m; }
+				setOverride(overrideKey, prevOverride ?? null);
 				syncStatus = 'error';
 				setTimeout(() => (syncStatus = 'idle'), 3000);
 			}
 		} catch {
-			// Rollback on failure
-			if (prevOverride) scheduleOverrides = new Map(scheduleOverrides).set(overrideKey, prevOverride);
-			else { const m = new Map(scheduleOverrides); m.delete(overrideKey); scheduleOverrides = m; }
+			setOverride(overrideKey, prevOverride ?? null);
+			syncStatus = 'error';
+			setTimeout(() => (syncStatus = 'idle'), 3000);
+		}
+	}
+
+	async function undoMove() {
+		if (syncStatus === 'saving' || !undoStack.length) return;
+		const entry = undoStack[undoStack.length - 1];
+		undoStack = undoStack.slice(0, -1);
+		setOverride(entry.key, entry.before);
+		syncStatus = 'saving';
+		try {
+			const res = entry.before
+				? await fetch('/api/cr/schedule', {
+						method: 'POST',
+						headers: { 'Content-Type': 'application/json' },
+						body: JSON.stringify(scheduleBody(entry.course, entry.origDay, entry.before))
+					})
+				: await fetch('/api/cr/schedule', {
+						method: 'DELETE',
+						headers: { 'Content-Type': 'application/json' },
+						body: JSON.stringify({ courseCode: entry.course.courseCode, component: entry.course.component ?? '', originalDay: entry.origDay })
+					});
+			if (!res.ok) throw new Error();
+			redoStack = [...redoStack, entry].slice(-3);
+			lastSyncedAt = Date.now();
+			syncStatus = 'saved';
+			setTimeout(() => (syncStatus = 'idle'), 2500);
+		} catch {
+			setOverride(entry.key, entry.after);
+			undoStack = [...undoStack, entry];
+			syncStatus = 'error';
+			setTimeout(() => (syncStatus = 'idle'), 3000);
+		}
+	}
+
+	async function redoMove() {
+		if (syncStatus === 'saving' || !redoStack.length) return;
+		const entry = redoStack[redoStack.length - 1];
+		redoStack = redoStack.slice(0, -1);
+		setOverride(entry.key, entry.after);
+		syncStatus = 'saving';
+		try {
+			const res = await fetch('/api/cr/schedule', {
+				method: 'POST',
+				headers: { 'Content-Type': 'application/json' },
+				body: JSON.stringify(scheduleBody(entry.course, entry.origDay, entry.after))
+			});
+			if (!res.ok) throw new Error();
+			undoStack = [...undoStack, entry].slice(-3);
+			lastSyncedAt = Date.now();
+			syncStatus = 'saved';
+			setTimeout(() => (syncStatus = 'idle'), 2500);
+		} catch {
+			setOverride(entry.key, entry.before);
+			redoStack = [...redoStack, entry];
 			syncStatus = 'error';
 			setTimeout(() => (syncStatus = 'idle'), 3000);
 		}
@@ -768,7 +992,7 @@
 
 <!-- Touch drag ghost (mobile only) -->
 {#if touchDragCourse}
-	<div style="position: fixed; left: {touchX - touchDragOffsetX}px; top: {touchY - touchDragOffsetY}px; width: {touchGhostW}px; height: {touchGhostH}px; pointer-events: none; z-index: 9999; opacity: 0.85; background: rgba(17,17,17,0.9); border: 1px solid var(--accent); padding: 2px 4px; overflow: hidden;">
+	<div style="position: fixed; left: {touchX - touchDragOffsetX}px; top: {touchY - touchDragOffsetY}px; width: {touchGhostW}px; height: {touchGhostH}px; pointer-events: none; z-index: 9999; opacity: 0.85; background: var(--block); border: 1px solid var(--accent); padding: 2px 4px; overflow: hidden;">
 		<div class="text-[10px] font-medium truncate" style="color: var(--fg);">{touchDragCourse.courseCode.split('-')[0]}</div>
 		<div class="text-[9px] truncate" style="color: var(--muted);">{touchDragCourse.courseName}</div>
 	</div>
@@ -794,6 +1018,13 @@
 				<a href="/admin" class="text-[10px] uppercase tracking-[0.12em] no-underline transition-colors duration-200" style="color: var(--muted);">admin</a>
 			{/if}
 			<span class="hidden text-[10px] tracking-wide md:inline" style="color: var(--muted);">{data.user.email}</span>
+			<button onclick={toggleTheme} title="Toggle light / dark"
+				class="cursor-pointer border-none bg-transparent text-[12px] leading-none transition-colors duration-200"
+				style="color: var(--muted);"
+				onmouseenter={(e) => { e.currentTarget.style.color = 'var(--accent)'; }}
+				onmouseleave={(e) => { e.currentTarget.style.color = 'var(--muted)'; }}
+				aria-label="Toggle theme"
+			>{theme === 'light' ? '☾' : '☀'}</button>
 			<button onclick={signOut}
 				class="cursor-pointer border-none bg-transparent text-[10px] uppercase tracking-[0.12em] transition-colors duration-200"
 				style="color: var(--fg);"
@@ -975,7 +1206,13 @@
 								</select>
 							</div>
 
-							{#each [{ l: 'uwe pref 1 (highest)', v: uwePref1, s: (x: string) => uwePref1 = x }, { l: 'uwe pref 2', v: uwePref2, s: (x: string) => uwePref2 = x }, { l: 'uwe pref 3 (lowest)', v: uwePref3, s: (x: string) => uwePref3 = x }] as pref}
+							<label class="flex cursor-pointer items-center gap-2 {locked ? 'opacity-30' : ''}">
+								<input type="checkbox" checked={minorOnly} disabled={locked} class="accent-white"
+									onchange={(e) => { minorOnly = e.currentTarget.checked; if (minorOnly) { uwePref1 = ''; uwePref2 = ''; uwePref3 = ''; } }} />
+								<span class="text-[9px] uppercase tracking-[0.1em]" style="color: var(--muted);">minor only — i don't want a uwe</span>
+							</label>
+
+							{#each minorOnly ? [] : [{ l: 'uwe pref 1 (highest)', v: uwePref1, s: (x: string) => uwePref1 = x }, { l: 'uwe pref 2', v: uwePref2, s: (x: string) => uwePref2 = x }, { l: 'uwe pref 3 (lowest)', v: uwePref3, s: (x: string) => uwePref3 = x }] as pref}
 								<div class="flex flex-col gap-2">
 									<span class="text-xs uppercase tracking-[0.1em]" style="color: var(--muted);">{pref.l}</span>
 									<select value={pref.v} onchange={(e) => pref.s(e.currentTarget.value)} disabled={locked}
@@ -1106,7 +1343,7 @@
 													{@const top = ((block.startMin - hStart) / 60) * 100}
 													{@const h = ((block.endMin - block.startMin) / 60) * 56}
 													<div class="absolute left-0.5 right-0.5 overflow-hidden px-1 py-0.5"
-														style="top: {top}%; height: {h}px; min-height: 24px; background: rgba(17,17,17,0.75); border: 1px solid var(--border);">
+														style="top: {top}%; height: {h}px; min-height: 24px; background: var(--block); border: 1px solid var(--border);">
 														<div class="text-[10px] font-medium truncate" style="color: var(--fg);">{block.course.courseCode.split('-')[0]}</div>
 														<div class="text-[9px] truncate" style="color: var(--muted);">{block.course.courseName}</div>
 														{#if h > 32}
@@ -1176,7 +1413,7 @@
 							{#each demandDepts as dept}
 								<button onclick={() => deptFilter = deptFilter === dept ? '' : dept}
 									class="cursor-pointer shrink-0 border px-2.5 py-1 text-[9px] uppercase tracking-[0.08em] transition-all duration-150"
-									style="border-color: {deptFilter === dept ? 'var(--accent)' : 'var(--border)'}; color: {deptFilter === dept ? 'var(--accent)' : 'var(--muted)'}; background: {deptFilter === dept ? 'rgba(255,255,255,0.03)' : 'transparent'};"
+									style="border-color: {deptFilter === dept ? 'var(--accent)' : 'var(--border)'}; color: {deptFilter === dept ? 'var(--accent)' : 'var(--muted)'}; background: {deptFilter === dept ? 'var(--tint)' : 'transparent'};"
 								>{dept}</button>
 							{/each}
 						</div>
@@ -1196,6 +1433,10 @@
 										style="color: {demandSort === 'total' ? 'var(--accent)' : 'var(--muted)'};"
 										onclick={() => { if (demandSort === 'total') demandSortDir = demandSortDir === 'desc' ? 'asc' : 'desc'; else { demandSort = 'total'; demandSortDir = 'desc'; } }}
 									>interested <span style="display: inline-block; width: 0.75em; text-align: center;">{demandSort === 'total' ? (demandSortDir === 'desc' ? '↓' : '↑') : ''}</span></th>
+									<th class="px-3 py-2 text-[9px] uppercase tracking-[0.1em] font-normal cursor-pointer select-none whitespace-nowrap"
+										style="color: {demandSort === 'conflict' ? 'var(--accent)' : 'var(--muted)'};"
+										onclick={() => { if (demandSort === 'conflict') demandSortDir = demandSortDir === 'desc' ? 'asc' : 'desc'; else { demandSort = 'conflict'; demandSortDir = 'asc'; } }}
+									>conflicts <span style="display: inline-block; width: 0.75em; text-align: center;">{demandSort === 'conflict' ? (demandSortDir === 'desc' ? '↓' : '↑') : ''}</span></th>
 									<th class="px-3 py-2 text-[9px] uppercase tracking-[0.1em] font-normal" style="color: var(--muted);">status</th>
 								</tr>
 							</thead>
@@ -1204,6 +1445,7 @@
 									{@const level = getTrafficLight(item.courseCode)}
 									{@const adjustedLevel = adjustedConflictMap().get(item.courseCode) ?? level}
 									{@const conflictCleared = level !== 'green' && adjustedLevel === 'green'}
+									{@const conf = demandConflicts().get(item.courseCode)}
 									{@const match = courses.find((c) => c.courseCode.startsWith(item.courseCode))}
 									<tr style="border-bottom: 1px solid var(--border);">
 										<td class="px-3 py-2.5">
@@ -1213,6 +1455,15 @@
 										<td class="px-3 py-2.5" style="color: var(--muted);">{item.p1}/{item.p2}/{item.p3}</td>
 										<td class="px-3 py-2.5 font-medium" style="color: var(--fg);">{item.priorityScore}</td>
 										<td class="px-3 py-2.5" style="color: var(--muted);">{item.total}</td>
+										<td class="px-3 py-2.5 whitespace-nowrap">
+											{#if conf && conf.score > 0}
+												{#if conf.red > 0}<span style="color: {tColors.red};">{conf.red}R</span>{/if}
+												{#if conf.red > 0 && conf.yellow > 0}<span style="color: var(--muted);"> · </span>{/if}
+												{#if conf.yellow > 0}<span style="color: {tColors.yellow};">{conf.yellow}Y</span>{/if}
+											{:else}
+												<span class="inline-block h-2 w-2 rounded-full" style="background: {tColors.green};"></span>
+											{/if}
+										</td>
 										<td class="px-3 py-2.5">
 											<div class="flex flex-wrap items-center gap-2">
 												<span class="inline-block h-2 w-2 rounded-full" style="background: {conflictCleared ? '#22c55e' : tColors[level]};"></span>
@@ -1240,6 +1491,23 @@
 							<span class="text-[8px] uppercase tracking-[0.08em] px-1.5 py-0.5" style="color: #22c55e; border: 1px solid #22c55e44; background: #22c55e0d;">no conflict after adjustment</span>
 							<span class="text-[8px] uppercase tracking-[0.1em]" style="color: var(--muted);">cr moved this slot</span>
 						</div>
+					</div>
+
+					<!-- Minor demand -->
+					<div class="flex flex-col gap-3 pt-4" style="border-top: 1px solid var(--border);">
+						<h2 class="text-lg" style="font-family: var(--font-serif); color: var(--accent);">minor demand</h2>
+						{#if minorDemand.length}
+							<div class="flex flex-col">
+								{#each minorDemand as item}
+									<div class="flex items-center justify-between gap-3 px-3 py-2.5" style="border-bottom: 1px solid var(--border);">
+										<span class="min-w-0 truncate text-xs" style="color: var(--fg);">{item.minor}</span>
+										<span class="shrink-0 text-xs font-medium" style="color: var(--fg);">{item.count} <span class="text-[9px] font-normal uppercase tracking-[0.08em]" style="color: var(--muted);">{item.count === 1 ? 'student' : 'students'}</span></span>
+									</div>
+								{/each}
+							</div>
+						{:else}
+							<p class="text-xs" style="color: var(--muted);">no minor selections yet</p>
+						{/if}
 					</div>
 				{/if}
 			</div>
@@ -1273,6 +1541,8 @@
 									try {
 										const res = await fetch('/api/cr/schedule', { method: 'DELETE' });
 										if (res.ok) {
+											undoStack = [];
+											redoStack = [];
 											syncStatus = 'saved';
 											setTimeout(() => (syncStatus = 'idle'), 2500);
 										} else {
@@ -1292,6 +1562,19 @@
 								onmouseleave={(e) => { (e.currentTarget as HTMLElement).style.color = 'var(--muted)'; (e.currentTarget as HTMLElement).style.borderColor = 'var(--border)'; }}
 							>reset positions</button>
 						{/if}
+						<!-- Undo / redo (session-only, last 3 moves) -->
+						<button onclick={undoMove} disabled={!undoStack.length || syncStatus === 'saving'}
+							class="cursor-pointer border px-2.5 py-1 text-[9px] uppercase tracking-[0.1em] transition-all duration-150 disabled:cursor-default disabled:opacity-30"
+							style="border-color: var(--border); color: var(--muted); background: transparent;"
+							onmouseenter={(e) => { e.currentTarget.style.color = 'var(--accent)'; }}
+							onmouseleave={(e) => { e.currentTarget.style.color = 'var(--muted)'; }}
+						>↶ undo</button>
+						<button onclick={redoMove} disabled={!redoStack.length || syncStatus === 'saving'}
+							class="cursor-pointer border px-2.5 py-1 text-[9px] uppercase tracking-[0.1em] transition-all duration-150 disabled:cursor-default disabled:opacity-30"
+							style="border-color: var(--border); color: var(--muted); background: transparent;"
+							onmouseenter={(e) => { e.currentTarget.style.color = 'var(--accent)'; }}
+							onmouseleave={(e) => { e.currentTarget.style.color = 'var(--muted)'; }}
+						>↷ redo</button>
 						<!-- Sync status -->
 						<span class="text-[9px] uppercase tracking-[0.12em] text-right" style="min-width: 5.5rem; color: {syncStatus === 'saving' ? 'var(--muted)' : syncStatus === 'saved' ? '#4e4' : syncStatus === 'error' ? '#e44' : 'var(--fg)'};">
 							{#if syncStatus === 'saving'}saving…{:else if syncStatus === 'saved'}synced ✓{:else if syncStatus === 'error'}sync failed{:else if lastSyncedAt > 0}live{/if}
@@ -1325,6 +1608,22 @@
 					{/if}
 				</div>
 
+				<!-- Dept filter chips -->
+				{#if ttDepts.length > 1}
+					<div class="flex gap-1.5 overflow-x-auto pb-0.5" style="scrollbar-width: none;">
+						<button onclick={() => ttDeptFilter = ''}
+							class="cursor-pointer shrink-0 border px-2.5 py-1 text-[9px] uppercase tracking-[0.08em] transition-all duration-150"
+							style="border-color: {!ttDeptFilter ? 'var(--muted)' : 'var(--border)'}; color: {!ttDeptFilter ? 'var(--fg)' : 'var(--muted)'}; background: transparent;"
+						>all</button>
+						{#each ttDepts as dept}
+							<button onclick={() => ttDeptFilter = ttDeptFilter === dept ? '' : dept}
+								class="cursor-pointer shrink-0 border px-2.5 py-1 text-[9px] uppercase tracking-[0.08em] transition-all duration-150"
+								style="border-color: {ttDeptFilter === dept ? 'var(--accent)' : 'var(--border)'}; color: {ttDeptFilter === dept ? 'var(--accent)' : 'var(--muted)'}; background: {ttDeptFilter === dept ? 'var(--tint)' : 'transparent'};"
+							>{dept}</button>
+						{/each}
+					</div>
+				{/if}
+
 				{#if !crBatchNames.length}
 					<p class="text-xs py-8 text-center" style="color: var(--muted);">no batches assigned — ask an admin to assign batches to your CR account</p>
 				{:else if calendarBlocks().length === 0 && loadingCourses}
@@ -1343,7 +1642,7 @@
 
 								{#each timeLabels as { mins, label }, i}
 									{#if i < timeLabels.length - 1}
-										{@const blockStarts = [...new Set(calendarBlocks().filter((b) => b.startMin > mins && b.startMin < mins + 60).map((b) => b.startMin))].sort((a, b) => a - b)}
+										{@const blockStarts = [...new Set(filteredCalendarBlocks().filter((b) => b.startMin > mins && b.startMin < mins + 60).map((b) => b.startMin))].sort((a, b) => a - b)}
 										<div class="relative px-0.5 text-right" style="height: {CELL_H}px; border-right: 1px solid var(--border); border-bottom: 1px solid var(--border);">
 											<span class="text-[7px]" style="color: var(--muted);">{label}</span>
 											{#each blockStarts as bMin}
@@ -1354,25 +1653,25 @@
 										{#each DAYS as day}
 											{@const hStart = mins}
 											{@const hEnd = mins + 60}
-											{@const cMsg = isConstrained(day, hStart, hEnd)}
-											<div class="relative" style="height: {CELL_H}px; border-right: 1px solid var(--border); border-bottom: 1px solid var(--border); {cMsg ? 'background: rgba(255,255,255,0.02);' : ''}"
+											<div class="relative" style="height: {CELL_H}px; border-right: 1px solid var(--border); border-bottom: 1px solid var(--border);"
 												role="cell" tabindex="-1"
 												data-day={day} data-hstart={hStart}
 												ondragover={(e) => onDragOver(e, day, hStart)}
 												ondrop={(e) => onDrop(e, day, hStart)}>
-												{#if cMsg}<div class="absolute inset-0 flex items-center justify-center opacity-15"><span class="text-[7px] uppercase" style="color: var(--muted);">locked</span></div>{/if}
-												{#each calendarBlocks().filter((b) => b.day === day && b.startMin >= hStart && b.startMin < hEnd) as block}
+												{#each filteredCalendarBlocks().filter((b) => b.day === day && b.startMin >= hStart && b.startMin < hEnd) as block}
 													{@const top = ((block.startMin - hStart) / 60) * CELL_H}
 													{@const h = ((block.endMin - block.startMin) / 60) * CELL_H}
 													{@const level = block.isUWE ? getTrafficLight(block.course.courseCode.split('-')[0]) : null}
+													{@const violation = block.isUWE ? null : blockConstraintViolation(block.course, block.day, block.startMin, block.endMin)}
 													{@const uweKey = block.day + '|' + block.startMin + '|' + block.endMin}
-													{@const uweGroup = block.isUWE ? calendarBlocks().filter(b2 => b2.isUWE && b2.day === block.day && b2.startMin === block.startMin && b2.endMin === block.endMin) : []}
+													{@const uweGroup = block.isUWE ? filteredCalendarBlocks().filter(b2 => b2.isUWE && b2.day === block.day && b2.startMin === block.startMin && b2.endMin === block.endMin) : []}
 													{@const uweIdx = block.isUWE ? uweGroup.findIndex(b2 => b2.course.courseCode === block.course.courseCode) : 0}
-													{@const activeUweIdx = uweGroupActive.get(uweKey) ?? 0}
+													{@const activeUweIdx = (uweGroupActive.get(uweKey) ?? 0) % (uweGroup.length || 1)}
 													{#if !block.isUWE || uweIdx === activeUweIdx}
 													<div role="button" tabindex="0"
 														class="absolute right-0.5 overflow-hidden px-1 py-0.5 {block.isUWE && uweGroup.length > 1 ? 'cursor-pointer left-0' : block.isUWE ? 'cursor-default pointer-events-none left-0' : 'cursor-grab active:cursor-grabbing left-0.5'}"
-														style="top: {top}px; height: {h}px; min-height: 20px; background: {block.isUWE ? 'rgba(255,255,255,0.04)' : 'rgba(17,17,17,0.75)'}; border: 1px solid {block.isUWE && level ? tColors[level] + '66' : 'var(--border)'}; z-index: {block.isUWE ? 1 : 2}; {block.isUWE ? 'border-left: 3px solid ' + (level ? tColors[level] : 'var(--border)') + ';' : ''}"
+														title={violation ? `Prof. ${violation} has a constraint at this time` : undefined}
+														style="top: {top}px; height: {h}px; min-height: 20px; background: {violation ? tColors.red + '1f' : block.isUWE ? 'var(--tint-strong)' : 'var(--block)'}; border: 1px solid {violation ? tColors.red : block.isUWE && level ? tColors[level] + '66' : 'var(--border)'}; z-index: {block.isUWE ? 1 : 2}; {violation ? 'border-left: 3px solid ' + tColors.red + ';' : block.isUWE ? 'border-left: 3px solid ' + (level ? tColors[level] : 'var(--border)') + ';' : ''}"
 														draggable={!block.isUWE}
 														ondragstart={(e) => { if (!block.isUWE) onDragStart(e, block.course, block.originalDay, block.isUWE); }}
 														ontouchstart={(e) => { if (!block.isUWE) onTouchStart(e, block.course, block.originalDay, block.isUWE); }}
@@ -1394,7 +1693,7 @@
 												{/each}
 											<!-- Ghost blocks (original positions of moved courses) -->
 											{#if showOriginals}
-												{#each ghostBlocks().filter((g) => g.day === day && g.startMin >= hStart && g.startMin < hEnd) as ghost}
+												{#each ghostBlocks().filter((g) => g.day === day && g.startMin >= hStart && g.startMin < hEnd && (!ttDeptFilter || deptPrefix(g.courseCode) === ttDeptFilter)) as ghost}
 													{@const gTop = ((ghost.startMin - hStart) / 60) * CELL_H}
 													{@const gH = Math.max(14, ((ghost.endMin - ghost.startMin) / 60) * CELL_H)}
 													<div class="absolute left-0.5 right-0.5 overflow-hidden px-1 py-0.5 pointer-events-none"
@@ -1422,20 +1721,39 @@
 					<div class="flex flex-col gap-4 pt-3" style="border-top: 1px solid var(--border);">
 						<!-- Top 3 UWEs (auto-shown) -->
 						<div class="flex flex-col gap-2">
-							<span class="text-[9px] uppercase tracking-[0.1em]" style="color: var(--muted);">top 3 uwes (shown on timetable)</span>
+							<div class="flex flex-wrap items-center justify-between gap-2">
+								<span class="text-[9px] uppercase tracking-[0.1em]" style="color: var(--muted);">top 3 uwes (shown on timetable)</span>
+								<div class="flex gap-1.5">
+									{#each [['demand', 'by demand'], ['conflict', 'least conflict']] as [mode, label]}
+										<button onclick={() => setTopUweMode(mode as 'demand' | 'conflict')}
+											class="cursor-pointer border px-2.5 py-1 text-[9px] uppercase tracking-[0.08em] transition-all duration-150"
+											style="border-color: {topUweMode === mode ? 'var(--accent)' : 'var(--border)'}; color: {topUweMode === mode ? 'var(--accent)' : 'var(--muted)'}; background: {topUweMode === mode ? 'var(--tint)' : 'transparent'};"
+										>{label}</button>
+									{/each}
+								</div>
+							</div>
 							<div class="grid grid-cols-1 gap-1.5 md:grid-cols-3">
-								{#each demand.slice(0, 3) as item, rank}
+								{#each rankedDemand().slice(0, 3) as item, rank}
 									{@const level = getTrafficLight(item.courseCode)}
 									{@const match = courses.find((c) => c.courseCode.startsWith(item.courseCode))}
+									{@const conf = demandConflicts().get(item.courseCode)}
 									<button
 										onclick={() => toggleUWE(item.courseCode)}
 										class="flex cursor-pointer items-center gap-2 border px-2.5 py-2 text-left transition-colors duration-150"
-										style="border-color: {enabledUWEs.has(item.courseCode) ? (tColors[level] + '66') : 'var(--border)'}; background: {enabledUWEs.has(item.courseCode) ? 'rgba(255,255,255,0.02)' : 'transparent'}; border-left: 3px solid {tColors[level]};"
+										style="border-color: {enabledUWEs.has(item.courseCode) ? (tColors[level] + '66') : 'var(--border)'}; background: {enabledUWEs.has(item.courseCode) ? 'var(--tint)' : 'transparent'}; border-left: 3px solid {tColors[level]};"
 									>
 										<div class="min-w-0 flex-1">
 											<div class="flex items-center gap-1.5">
 												<span class="text-[10px] font-medium" style="color: var(--fg);">{item.courseCode}</span>
-												<span class="text-[8px]" style="color: var(--muted);">P{rank + 1}</span>
+												{#if topUweMode === 'demand'}
+													<span class="text-[8px]" style="color: var(--muted);">P{rank + 1}</span>
+												{:else if conf && conf.score > 0}
+													<span class="text-[8px]">
+														{#if conf.red > 0}<span style="color: {tColors.red};">{conf.red}R</span>{/if}{#if conf.red > 0 && conf.yellow > 0}<span style="color: var(--muted);">·</span>{/if}{#if conf.yellow > 0}<span style="color: {tColors.yellow};">{conf.yellow}Y</span>{/if}
+													</span>
+												{:else}
+													<span class="text-[8px]" style="color: {tColors.green};">clear</span>
+												{/if}
 											</div>
 											{#if match}<div class="text-[8px] truncate" style="color: var(--muted);">{match.courseName}</div>{/if}
 										</div>
@@ -1449,17 +1767,27 @@
 						</div>
 
 						<!-- Rest of UWEs as toggles -->
-						{#if restDemandedUWEs.length > 0}
+						{#if restDemandedUWEs().length > 0}
 							<div class="flex flex-col gap-2">
-								<span class="text-[9px] uppercase tracking-[0.1em]" style="color: var(--muted);">other demanded uwes — click to overlay</span>
+								<div class="flex flex-wrap items-center justify-between gap-2">
+									<span class="text-[9px] uppercase tracking-[0.1em]" style="color: var(--muted);">other demanded uwes — click to overlay</span>
+									<div class="flex gap-1.5">
+										{#each [['course', 'by course'], ['demand', 'by demand'], ['conflict', 'least conflict']] as [mode, label]}
+											<button onclick={() => restUweSort = mode as 'course' | 'demand' | 'conflict'}
+												class="cursor-pointer border px-2.5 py-1 text-[9px] uppercase tracking-[0.08em] transition-all duration-150"
+												style="border-color: {restUweSort === mode ? 'var(--accent)' : 'var(--border)'}; color: {restUweSort === mode ? 'var(--accent)' : 'var(--muted)'}; background: {restUweSort === mode ? 'var(--tint)' : 'transparent'};"
+											>{label}</button>
+										{/each}
+									</div>
+								</div>
 								<div class="flex flex-wrap gap-1.5">
-									{#each restDemandedUWEs as item}
+									{#each restDemandedUWEs() as item}
 										{@const level = getTrafficLight(item.courseCode)}
 										{@const active = enabledUWEs.has(item.courseCode)}
 										<button
 											onclick={() => toggleUWE(item.courseCode)}
 											class="cursor-pointer border px-2 py-1 text-[10px] tracking-wide transition-all duration-150"
-											style="border-color: {active ? (tColors[level] + '88') : 'var(--border)'}; color: {active ? 'var(--fg)' : 'var(--muted)'}; background: {active ? 'rgba(255,255,255,0.03)' : 'transparent'};"
+											style="border-color: {active ? (tColors[level] + '88') : 'var(--border)'}; color: {active ? 'var(--fg)' : 'var(--muted)'}; background: {active ? 'var(--tint)' : 'transparent'};"
 										>
 											<span class="inline-block h-1 w-1 rounded-full mr-1" style="background: {tColors[level]};"></span>
 											{item.courseCode}
@@ -1494,10 +1822,34 @@
 				<!-- Add form -->
 				<div class="flex flex-col gap-3 border p-4" style="border-color: var(--border);">
 					<div class="flex flex-col gap-1">
-						<span class="text-[9px] uppercase tracking-[0.1em]" style="color: var(--muted);">professor</span>
-						<input bind:value={profName} placeholder="Prof. Sharma"
-							class="border bg-transparent px-3 py-2.5 text-xs outline-none"
-							style="border-color: var(--border); color: var(--fg);" />
+						<span class="text-[9px] uppercase tracking-[0.1em]" style="color: var(--muted);">professor — search by name or course code</span>
+						<div class="relative">
+							<input bind:value={profName} placeholder="e.g. Sharma or ECE204"
+								autocomplete="off"
+								oninput={() => profSuggestOpen = true}
+								onfocus={() => profSuggestOpen = true}
+								onblur={() => setTimeout(() => profSuggestOpen = false, 150)}
+								class="w-full border bg-transparent px-3 py-2.5 text-xs outline-none"
+								style="border-color: var(--border); color: var(--fg);" />
+							{#if profSuggestions().length}
+								<div class="absolute left-0 top-full z-10 mt-0.5 max-h-56 w-full overflow-y-auto border"
+									style="background: var(--surface); border-color: var(--border);">
+									{#each profSuggestions() as p}
+										<button
+											onmousedown={() => { profName = p.name; profSuggestOpen = false; }}
+											ontouchstart={() => { profName = p.name; profSuggestOpen = false; }}
+											class="flex w-full cursor-pointer items-baseline justify-between gap-2 border-none bg-transparent px-3 py-2.5 text-left transition-colors duration-100"
+											style="color: var(--muted);"
+											onmouseenter={(e) => { e.currentTarget.style.background = 'var(--border)'; e.currentTarget.style.color = 'var(--accent)'; }}
+											onmouseleave={(e) => { e.currentTarget.style.background = 'transparent'; e.currentTarget.style.color = 'var(--muted)'; }}
+										>
+											<span class="min-w-0 truncate text-xs" style="color: var(--fg);">{p.name}</span>
+											<span class="shrink-0 text-[9px] uppercase tracking-[0.05em]">{p.codes.slice(0, 4).join(', ')}{p.codes.length > 4 ? ` +${p.codes.length - 4}` : ''}</span>
+										</button>
+									{/each}
+								</div>
+							{/if}
+						</div>
 					</div>
 					<div class="flex gap-3">
 						<div class="flex flex-1 flex-col gap-1">
