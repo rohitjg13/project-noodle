@@ -1,53 +1,457 @@
-@import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@300;400;500;600&family=Instrument+Serif:ital@0;1&display=swap');
 @import 'tailwindcss';
 
+/* ============================================================
+   noodle — design tokens
+   Warm "academic planner": paper + ink neutrals, one calm
+   ink-blue accent (kept clear of the green/yellow/red traffic
+   lights used in the schedule). Variable NAMES are preserved so
+   the timetable grid inherits the refreshed look untouched.
+   ============================================================ */
+
 :root {
-	--bg: #0a0a0a;
-	--fg: #e8e8e8;
-	--muted: #888;
-	--border: #222;
-	--surface: #111;
-	--accent: #fff;
+	/* dark — deep teal ground + bright cyan accent */
+	--bg: #0b1618;
+	--fg: #dceaec;
+	--muted: #82999d;
+	--border: #20363a;
+	--surface: #112225;
+	--accent: #22d3ee;
+	--accent-strong: #67e8f9;
+	--on-accent: #042b30;
 	/* Block/overlay surfaces that flip with the theme */
-	--block: rgba(17, 17, 17, 0.75);
+	--block: rgba(17, 34, 37, 0.82);
 	--tint: rgba(255, 255, 255, 0.03);
 	--tint-strong: rgba(255, 255, 255, 0.05);
+
+	--radius: 12px;
+	--radius-sm: 8px;
+	--shadow: 0 1px 2px rgba(0, 0, 0, 0.4), 0 8px 24px -12px rgba(0, 0, 0, 0.6);
+	--shadow-lg: 0 24px 60px -20px rgba(0, 0, 0, 0.75);
+	--ring: color-mix(in srgb, var(--accent) 30%, transparent);
+
 	color-scheme: dark;
 }
 
 :root[data-theme='light'] {
-	--bg: #faf9f7;
-	--fg: #1c1c1c;
-	--muted: #6b6b6b;
-	--border: #e2ddd5;
-	--surface: #ffffff;
-	--accent: #111111;
-	--block: rgba(255, 255, 255, 0.92);
+	/* light — pale cyan paper + deep cyan accent */
+	--bg: #ecf6f7;
+	--fg: #082a30;
+	--muted: #54757a;
+	--border: #cfe3e5;
+	--surface: #fbfeff;
+	--accent: #0891b2;
+	--accent-strong: #0e7490;
+	--on-accent: #ffffff;
+	--block: rgba(251, 254, 255, 0.92);
 	--tint: rgba(0, 0, 0, 0.04);
 	--tint-strong: rgba(0, 0, 0, 0.06);
+
+	--shadow: 0 1px 2px rgba(8, 40, 46, 0.07), 0 12px 28px -16px rgba(8, 40, 46, 0.18);
+	--shadow-lg: 0 28px 64px -24px rgba(8, 40, 46, 0.26);
+	--ring: color-mix(in srgb, var(--accent) 22%, transparent);
+
 	color-scheme: light;
 }
 
 @theme {
-	--font-mono: 'JetBrains Mono', monospace;
-	--font-serif: 'Instrument Serif', serif;
+	--font-mono: 'JetBrains Mono', ui-monospace, monospace;
+	--font-serif: 'Arial Narrow', 'Archivo Narrow', 'Helvetica Neue', Helvetica, sans-serif;
+	--font-sans: 'Hanken Grotesk', ui-sans-serif, system-ui, sans-serif;
 }
 
 * {
 	box-sizing: border-box;
 }
 
-html, body {
+html,
+body {
 	margin: 0;
 	padding: 0;
 	background: var(--bg);
 	color: var(--fg);
-	font-family: var(--font-mono);
+	font-family: var(--font-sans);
+	font-size: 16px;
+	line-height: 1.5;
 	-webkit-font-smoothing: antialiased;
 	-moz-osx-font-smoothing: grayscale;
+	text-rendering: optimizeLegibility;
 }
 
 ::selection {
-	background: var(--fg);
-	color: var(--bg);
+	background: var(--accent);
+	color: var(--on-accent);
+}
+
+:focus-visible {
+	outline: 2px solid var(--accent);
+	outline-offset: 2px;
+	border-radius: 3px;
+}
+
+/* Thin, quiet scrollbars to match the editorial calm */
+* {
+	scrollbar-width: thin;
+	scrollbar-color: var(--border) transparent;
+}
+*::-webkit-scrollbar {
+	width: 9px;
+	height: 9px;
+}
+*::-webkit-scrollbar-thumb {
+	background: var(--border);
+	border-radius: 999px;
+}
+*::-webkit-scrollbar-track {
+	background: transparent;
+}
+
+/* ============================================================
+   Type system — Fraunces display, Hanken UI, Mono for data
+   ============================================================ */
+
+.font-display {
+	font-family: var(--font-serif);
+	font-optical-sizing: auto;
+}
+
+.title-xl,
+.title-lg,
+.title-md {
+	font-family: var(--font-serif);
+	font-optical-sizing: auto;
+	font-weight: 700;
+	color: var(--fg);
+	letter-spacing: -0.005em;
+	line-height: 1.06;
+	margin: 0;
+}
+.title-xl {
+	font-size: clamp(2.05rem, 4.5vw, 2.6rem);
+}
+.title-lg {
+	font-size: clamp(1.45rem, 3vw, 1.7rem);
+}
+.title-md {
+	font-size: 1.32rem;
+	line-height: 1.18;
+}
+
+/* tiny uppercase label — the one place microtype belongs */
+.eyebrow {
+	font-family: var(--font-mono);
+	font-size: 0.66rem;
+	font-weight: 500;
+	letter-spacing: 0.18em;
+	text-transform: uppercase;
+	color: var(--muted);
+}
+
+.hint {
+	font-size: 0.82rem;
+	line-height: 1.55;
+	color: var(--muted);
+}
+
+.field-label {
+	display: block;
+	font-size: 0.8rem;
+	font-weight: 600;
+	letter-spacing: 0.01em;
+	color: var(--fg);
+	margin-bottom: 0.45rem;
+}
+
+/* schedule grids keep the precise monospace identity */
+.nood-mono,
+.nood-mono input,
+.nood-mono select,
+.nood-mono button {
+	font-family: var(--font-mono);
+}
+
+/* ============================================================
+   Surfaces
+   ============================================================ */
+
+.card {
+	background: var(--surface);
+	border: 1px solid var(--border);
+	border-radius: var(--radius);
+	box-shadow: var(--shadow);
+}
+.card-pad {
+	padding: 1.4rem;
+}
+@media (min-width: 768px) {
+	.card-pad {
+		padding: 1.75rem;
+	}
+}
+
+.divider {
+	height: 1px;
+	width: 100%;
+	background: var(--border);
+	border: 0;
+}
+
+.badge {
+	display: inline-flex;
+	align-items: center;
+	gap: 0.4rem;
+	font-family: var(--font-mono);
+	font-size: 0.62rem;
+	font-weight: 500;
+	letter-spacing: 0.12em;
+	text-transform: uppercase;
+	color: var(--muted);
+	border: 1px solid var(--border);
+	border-radius: 999px;
+	padding: 0.28rem 0.6rem;
+	white-space: nowrap;
+}
+
+/* ============================================================
+   Buttons — obvious, tactile affordances
+   ============================================================ */
+
+.btn {
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
+	gap: 0.5rem;
+	font-family: var(--font-sans);
+	font-size: 0.875rem;
+	font-weight: 600;
+	line-height: 1;
+	padding: 0.7rem 1.15rem;
+	border-radius: var(--radius-sm);
+	border: 1px solid transparent;
+	cursor: pointer;
+	white-space: nowrap;
+	transition:
+		background 0.18s ease,
+		border-color 0.18s ease,
+		color 0.18s ease,
+		transform 0.06s ease,
+		box-shadow 0.18s ease;
+	text-decoration: none;
+}
+.btn:active {
+	transform: translateY(1px);
+}
+.btn:disabled {
+	opacity: 0.4;
+	cursor: not-allowed;
+	transform: none;
+}
+
+.btn-primary {
+	background: var(--accent);
+	color: var(--on-accent);
+	border-color: var(--accent);
+}
+.btn-primary:not(:disabled):hover {
+	background: var(--accent-strong);
+	border-color: var(--accent-strong);
+	box-shadow: 0 6px 18px -8px var(--ring);
+}
+
+.btn-ghost {
+	background: transparent;
+	color: var(--fg);
+	border-color: var(--border);
+}
+.btn-ghost:not(:disabled):hover {
+	border-color: var(--accent);
+	color: var(--accent);
+	background: var(--tint);
+}
+
+.btn-danger {
+	background: transparent;
+	color: #d8593f;
+	border-color: color-mix(in srgb, #d8593f 45%, var(--border));
+}
+.btn-danger:not(:disabled):hover {
+	background: color-mix(in srgb, #d8593f 12%, transparent);
+	border-color: #d8593f;
+}
+
+.btn-sm {
+	font-size: 0.78rem;
+	padding: 0.45rem 0.75rem;
+	gap: 0.35rem;
+}
+.btn-block {
+	width: 100%;
+}
+
+/* subtle text-only link button */
+.linkbtn {
+	background: none;
+	border: 0;
+	padding: 0;
+	cursor: pointer;
+	font-size: 0.8rem;
+	font-weight: 500;
+	color: var(--muted);
+	transition: color 0.16s ease;
+}
+.linkbtn:hover {
+	color: var(--accent);
+}
+
+/* ============================================================
+   Form controls — generous, legible, clear focus
+   ============================================================ */
+
+.input,
+.select {
+	width: 100%;
+	min-width: 0;
+	font-family: var(--font-sans);
+	font-size: 0.92rem;
+	color: var(--fg);
+	background: var(--bg);
+	border: 1px solid var(--border);
+	border-radius: var(--radius-sm);
+	padding: 0.7rem 0.85rem;
+	transition:
+		border-color 0.16s ease,
+		box-shadow 0.16s ease;
+	outline: none;
+}
+.input::placeholder {
+	color: var(--muted);
+	opacity: 0.75;
+}
+.input:focus,
+.select:focus {
+	border-color: var(--accent);
+	box-shadow: 0 0 0 3px var(--ring);
+}
+.select {
+	appearance: none;
+	background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='8' viewBox='0 0 12 8' fill='none'%3E%3Cpath d='M1 1.5 6 6.5 11 1.5' stroke='%237f9aa0' stroke-width='1.7' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
+	background-position: right 0.9rem center;
+	background-size: 12px 8px;
+	background-repeat: no-repeat;
+	padding-right: 2.4rem;
+	cursor: pointer;
+}
+
+/* step + rank markers used on the preferences flow */
+.step-num {
+	display: inline-grid;
+	place-items: center;
+	flex-shrink: 0;
+	width: 1.9rem;
+	height: 1.9rem;
+	border-radius: 999px;
+	border: 1.5px solid var(--accent);
+	color: var(--accent);
+	font-family: var(--font-mono);
+	font-weight: 600;
+	font-size: 0.85rem;
+}
+.rank-num {
+	display: inline-grid;
+	place-items: center;
+	flex-shrink: 0;
+	width: 2.5rem;
+	height: 2.5rem;
+	border-radius: 999px;
+	background: var(--accent);
+	color: var(--on-accent);
+	font-family: var(--font-mono);
+	font-weight: 700;
+	font-size: 1.1rem;
+	box-shadow:
+		0 6px 16px -6px var(--ring),
+		0 0 0 4px color-mix(in srgb, var(--accent) 12%, transparent);
+}
+
+/* ============================================================
+   Tabs — clear active state
+   ============================================================ */
+
+.tab {
+	position: relative;
+	background: none;
+	border: 0;
+	border-bottom: 2px solid transparent;
+	margin-bottom: -1px;
+	padding: 0.85rem 0.25rem;
+	font-family: var(--font-sans);
+	font-size: 0.9rem;
+	font-weight: 600;
+	color: var(--muted);
+	cursor: pointer;
+	white-space: nowrap;
+	transition:
+		color 0.16s ease,
+		border-color 0.16s ease;
+}
+.tab:hover {
+	color: var(--fg);
+}
+.tab-active {
+	color: var(--fg);
+	border-bottom-color: var(--accent);
+}
+
+/* ============================================================
+   Chips — filters & toggles
+   ============================================================ */
+
+.chip {
+	flex-shrink: 0;
+	background: transparent;
+	border: 1px solid var(--border);
+	border-radius: 999px;
+	padding: 0.35rem 0.75rem;
+	font-size: 0.78rem;
+	font-weight: 500;
+	color: var(--muted);
+	cursor: pointer;
+	white-space: nowrap;
+	transition:
+		color 0.15s ease,
+		border-color 0.15s ease,
+		background 0.15s ease;
+}
+.chip:hover {
+	color: var(--fg);
+	border-color: var(--muted);
+}
+.chip-active {
+	color: var(--accent);
+	border-color: var(--accent);
+	background: var(--tint);
+}
+
+/* ============================================================
+   Motion — calm, purposeful entrances
+   ============================================================ */
+
+@keyframes nood-fade-up {
+	from {
+		opacity: 0;
+		transform: translateY(8px);
+	}
+	to {
+		opacity: 1;
+		transform: translateY(0);
+	}
+}
+.animate-in {
+	animation: nood-fade-up 0.42s cubic-bezier(0.22, 0.7, 0.27, 1) both;
+}
+
+@media (prefers-reduced-motion: reduce) {
+	* {
+		animation-duration: 0.01ms !important;
+		transition-duration: 0.01ms !important;
+	}
 }

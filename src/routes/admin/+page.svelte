@@ -14,188 +14,155 @@
 	}
 </script>
 
-<div class="flex min-h-screen flex-col px-8 py-8" style="background: var(--bg);">
-	<header class="flex items-center justify-between">
-		<div class="flex items-center gap-6">
-			<a
-				href="/"
-				class="text-lg transition-colors duration-200"
-				style="font-family: var(--font-serif); color: var(--accent);"
-			>
-				noodle
-			</a>
-			<span class="text-[10px] uppercase tracking-[0.15em]" style="color: var(--muted);">
-				/ admin
-			</span>
-		</div>
-		<div class="flex items-center gap-5">
-			<a href="/"
-				class="text-[10px] uppercase tracking-[0.12em] no-underline transition-colors duration-200"
-				style="color: var(--muted);"
-				onmouseenter={(e) => { e.currentTarget.style.color = 'var(--accent)'; }}
-				onmouseleave={(e) => { e.currentTarget.style.color = 'var(--muted)'; }}
-			>← back</a>
-			<a href="/auth/signout"
-				class="text-[10px] uppercase tracking-[0.12em] no-underline transition-colors duration-200"
-				style="color: var(--muted);"
-				onmouseenter={(e) => { e.currentTarget.style.color = 'var(--accent)'; }}
-				onmouseleave={(e) => { e.currentTarget.style.color = 'var(--muted)'; }}
-			>sign out</a>
+<div class="flex min-h-dvh flex-col" style="background: var(--bg);">
+	<header class="flex items-center justify-between gap-3 px-4 py-3 md:px-8 md:py-4" style="border-bottom: 1px solid var(--border);">
+		<a href="/" class="flex items-center gap-2.5 no-underline">
+			<span class="grid h-7 w-7 place-items-center rounded-md" style="background: var(--accent); color: var(--on-accent); font-family: var(--font-serif); font-weight: 700; font-size: 1.25rem; line-height: 1;">n</span>
+			<span class="title-md" style="font-size: 1.35rem;">noodle</span>
+			<span class="badge ml-1">admin</span>
+		</a>
+		<div class="flex items-center gap-3">
+			<a href="/" class="linkbtn no-underline">← back</a>
+			<a href="/auth/signout" class="linkbtn no-underline">sign out</a>
 		</div>
 	</header>
 
-	<main class="mx-auto flex w-full max-w-2xl flex-1 flex-col gap-12 py-12">
+	<main class="animate-in mx-auto flex w-full max-w-4xl flex-1 flex-col gap-6 px-4 py-8 md:px-8 md:py-12">
+		<div class="flex flex-col gap-1">
+			<h1 class="title-xl">Class representatives</h1>
+			<p class="hint">Assign students as class reps for one or more batches. CRs can manage demand, constraints, and the timetable for their batches.</p>
+		</div>
 
 		{#if form?.error}
-			<div class="border px-4 py-3 text-xs tracking-wide" style="border-color: var(--accent); color: var(--accent);">
-				{form.error}
+			<div class="card flex items-center gap-2 px-4 py-3 text-sm" style="border-color: color-mix(in srgb, #d8593f 45%, var(--border)); color: #d8593f;">
+				<span>⚠</span>{form.error}
 			</div>
 		{/if}
 		{#if form?.success}
-			<div class="border px-4 py-3 text-xs tracking-wide" style="border-color: var(--muted); color: var(--muted);">
+			<div class="card flex items-center gap-2 px-4 py-3 text-sm" style="border-color: color-mix(in srgb, #3fa463 45%, var(--border)); color: #3fa463;">
+				<span>✓</span>
 				{#if form.action === 'assignCr'}
 					{form.name} is now CR of {form.batch}
 				{:else if form.action === 'removeCr'}
-					cr assignment removed
+					CR assignment removed
 				{/if}
 			</div>
 		{/if}
 
-		<!-- Assign CR -->
-		<section class="flex flex-col gap-6">
-			<div class="flex items-center justify-between">
-				<h2 class="text-[10px] uppercase tracking-[0.2em]" style="color: var(--muted);">class representatives</h2>
-				<button
-					onclick={() => { showAssignCR = !showAssignCR; selectedBatches = new Set(); }}
-					class="cursor-pointer border-none bg-transparent text-[10px] uppercase tracking-[0.15em] transition-colors duration-200"
-					style="color: var(--muted);"
-					onmouseenter={(e) => { (e.currentTarget as HTMLElement).style.color = 'var(--accent)'; }}
-					onmouseleave={(e) => { (e.currentTarget as HTMLElement).style.color = 'var(--muted)'; }}
-				>
-					{showAssignCR ? 'cancel' : '+ assign cr'}
-				</button>
-			</div>
-
-			{#if showAssignCR}
-				<form
-					method="POST"
-					action="?/assignCr"
-					use:enhance={() => ({ update }) => { update(); showAssignCR = false; selectedBatches = new Set(); }}
-					class="flex flex-col gap-5 border p-6"
-					style="border-color: var(--border);"
-				>
-					<div class="flex flex-col gap-2">
-						<label for="cr-email" class="text-[10px] uppercase tracking-[0.15em]" style="color: var(--muted);">email</label>
-						<input
-							id="cr-email"
-							name="email"
-							type="email"
-							required
-							placeholder="student@example.com"
-							class="border bg-transparent px-3 py-2 text-xs tracking-wide outline-none transition-colors duration-200 focus:border-current"
-							style="border-color: var(--border); color: var(--fg);"
-						/>
-					</div>
-
-					<div class="flex flex-col gap-3">
-						<span class="text-[10px] uppercase tracking-[0.15em]" style="color: var(--muted);">
-							batches <span style="color: var(--muted);">({data.batches.length} loaded)</span>
-						</span>
-
-						{#if data.batches.length === 0}
-							<p class="text-[11px]" style="color: var(--muted);">no batches in timetable file</p>
-						{:else}
-							<div
-								class="grid gap-x-4 gap-y-2 border p-4"
-								style="border-color: var(--border); grid-template-columns: repeat(auto-fill, minmax(100px, 1fr));"
-							>
-								{#each data.batches as b}
-									{#if selectedBatches.has(b.id)}
-										<input type="hidden" name="batchIds" value={b.id} />
-									{/if}
-									<label
-										class="flex cursor-pointer items-center gap-2 text-[11px] tracking-wide transition-colors duration-150"
-										style="color: {selectedBatches.has(b.id) ? 'var(--fg)' : 'var(--muted)'};"
-									>
-										<span
-											class="flex h-3 w-3 shrink-0 items-center justify-center border transition-colors duration-150"
-											style="border-color: {selectedBatches.has(b.id) ? 'var(--accent)' : 'var(--border)'}; background: {selectedBatches.has(b.id) ? 'var(--accent)' : 'transparent'};"
-											onclick={() => toggleBatch(b.id)}
-											role="checkbox"
-											aria-checked={selectedBatches.has(b.id)}
-											tabindex="0"
-											onkeydown={(e) => e.key === ' ' && toggleBatch(b.id)}
-										>
-											{#if selectedBatches.has(b.id)}
-												<svg width="7" height="7" viewBox="0 0 8 8" fill="none">
-													<path d="M1 4L3 6L7 2" stroke="var(--bg)" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
-												</svg>
-											{/if}
-										</span>
-										{b.name}
-									</label>
-								{/each}
-							</div>
-							<p class="text-[10px]" style="color: var(--muted);">{selectedBatches.size} selected</p>
-						{/if}
-					</div>
-
+		<div class="grid gap-6 lg:grid-cols-2 lg:items-start">
+			<!-- Assign CR -->
+			<section class="flex flex-col gap-4">
+				<div class="flex items-center justify-between">
+					<h2 class="title-md">Add a CR</h2>
 					<button
-						type="submit"
-						disabled={selectedBatches.size === 0}
-						class="cursor-pointer border px-6 py-2.5 text-[10px] uppercase tracking-[0.2em] transition-all duration-300 disabled:cursor-not-allowed disabled:opacity-30"
-						style="border-color: var(--muted); color: var(--muted); background: transparent;"
-						onmouseenter={(e) => { if (selectedBatches.size > 0) { (e.currentTarget as HTMLElement).style.color = 'var(--accent)'; (e.currentTarget as HTMLElement).style.borderColor = 'var(--accent)'; } }}
-						onmouseleave={(e) => { (e.currentTarget as HTMLElement).style.color = 'var(--muted)'; (e.currentTarget as HTMLElement).style.borderColor = 'var(--muted)'; }}
+						onclick={() => { showAssignCR = !showAssignCR; selectedBatches = new Set(); }}
+						class="btn {showAssignCR ? 'btn-ghost' : 'btn-primary'} btn-sm"
 					>
-						assign as cr
+						{showAssignCR ? 'cancel' : '+ assign CR'}
 					</button>
-				</form>
-			{/if}
+				</div>
+
+				{#if showAssignCR}
+					<form
+						method="POST"
+						action="?/assignCr"
+						use:enhance={() => ({ update }) => { update(); showAssignCR = false; selectedBatches = new Set(); }}
+						class="card card-pad flex flex-col gap-5"
+					>
+						<div class="flex flex-col">
+							<label for="cr-email" class="field-label">Student email</label>
+							<input
+								id="cr-email"
+								name="email"
+								type="email"
+								required
+								placeholder="student@example.com"
+								class="input"
+							/>
+						</div>
+
+						<div class="flex flex-col gap-3">
+							<span class="field-label" style="margin-bottom: 0;">
+								Batches <span style="color: var(--muted); font-weight: 400;">({data.batches.length} loaded)</span>
+							</span>
+
+							{#if data.batches.length === 0}
+								<p class="hint">No batches found in the timetable file.</p>
+							{:else}
+								<div class="flex flex-wrap gap-2">
+									{#each data.batches as b}
+										{#if selectedBatches.has(b.id)}
+											<input type="hidden" name="batchIds" value={b.id} />
+										{/if}
+										<button
+											type="button"
+											onclick={() => toggleBatch(b.id)}
+											class="chip {selectedBatches.has(b.id) ? 'chip-active' : ''}"
+											aria-pressed={selectedBatches.has(b.id)}
+										>
+											{b.name}
+										</button>
+									{/each}
+								</div>
+								<p class="hint">{selectedBatches.size} selected</p>
+							{/if}
+						</div>
+
+						<button type="submit" disabled={selectedBatches.size === 0} class="btn btn-primary">
+							assign as CR
+						</button>
+					</form>
+				{:else}
+					<p class="hint">Click <span style="color: var(--fg); font-weight: 600;">+ assign CR</span> to give a student class-rep access for their batches.</p>
+				{/if}
+			</section>
 
 			<!-- CR list grouped by user -->
-			{#if data.crs.length === 0}
-				<p class="text-xs tracking-wide" style="color: var(--muted);">no crs assigned yet</p>
-			{:else}
-				<div class="flex flex-col gap-3">
-					{#each data.crs as cr}
-						<div class="border px-4 py-4" style="border-color: var(--border);">
-							<p class="text-xs tracking-wide" style="color: var(--fg);">{cr.user.name}</p>
-							<p class="mt-0.5 text-[11px]" style="color: var(--muted);">{cr.user.email}</p>
-							<div class="mt-3 flex flex-wrap gap-2">
-								{#each cr.batches as b}
-									<span
-										class="flex items-center gap-1.5 border px-2 py-1 text-[10px] uppercase tracking-[0.1em]"
-										style="border-color: var(--border); color: var(--muted);"
-									>
-										{b.name}
-										<form method="POST" action="?/removeCr" use:enhance class="inline">
-											<input type="hidden" name="assignmentId" value={b.assignmentId} />
-											<input type="hidden" name="userId" value={cr.user.id} />
-											<button
-												type="submit"
-												class="cursor-pointer border-none bg-transparent text-sm leading-none transition-colors duration-200"
-												style="color: var(--muted);"
-												onmouseenter={(e) => { (e.currentTarget as HTMLElement).style.color = 'var(--accent)'; }}
-												onmouseleave={(e) => { (e.currentTarget as HTMLElement).style.color = 'var(--border)'; }}
-												aria-label="remove {b.name}"
-											>×</button>
-										</form>
-									</span>
-								{/each}
+			<section class="flex flex-col gap-3">
+				<span class="eyebrow">Current CRs ({data.crs.length})</span>
+				{#if data.crs.length === 0}
+					<div class="card card-pad text-center">
+						<p class="hint">No CRs assigned yet.</p>
+					</div>
+				{:else}
+					<div class="flex flex-col gap-3">
+						{#each data.crs as cr}
+							<div class="card card-pad">
+								<p class="text-base font-semibold" style="color: var(--fg);">{cr.user.name}</p>
+								<p class="mt-0.5 text-sm" style="color: var(--muted);">{cr.user.email}</p>
+								<div class="mt-3 flex flex-wrap gap-2">
+									{#each cr.batches as b}
+										<span class="badge" style="color: var(--fg);">
+											{b.name}
+											<form method="POST" action="?/removeCr" use:enhance class="inline">
+												<input type="hidden" name="assignmentId" value={b.assignmentId} />
+												<input type="hidden" name="userId" value={cr.user.id} />
+												<button
+													type="submit"
+													class="cursor-pointer border-none bg-transparent text-base leading-none transition-colors duration-200"
+													style="color: var(--muted);"
+													onmouseenter={(e) => { (e.currentTarget as HTMLElement).style.color = '#d8593f'; }}
+													onmouseleave={(e) => { (e.currentTarget as HTMLElement).style.color = 'var(--muted)'; }}
+													aria-label="remove {b.name}"
+												>×</button>
+											</form>
+										</span>
+									{/each}
+								</div>
 							</div>
-						</div>
-					{/each}
-				</div>
-			{/if}
-		</section>
-
+						{/each}
+					</div>
+				{/if}
+			</section>
+		</div>
 	</main>
-</div>
 
-<footer class="py-4 text-center text-[9px] uppercase tracking-[0.12em]" style="color: var(--muted); background: var(--bg);">
-	built and maintained by <a href="https://github.com/rohitjg13" target="_blank" rel="noopener noreferrer" style="color: var(--muted); text-decoration: underline; text-underline-offset: 3px; transition: color 0.15s;"
-		onmouseenter={(e) => { (e.currentTarget as HTMLAnchorElement).style.color = 'var(--accent)'; }}
-		onmouseleave={(e) => { (e.currentTarget as HTMLAnchorElement).style.color = 'var(--muted)'; }}
-	>rohit j g</a>
-</footer>
+	<footer class="border-t py-5 text-center" style="border-color: var(--border); background: var(--bg);">
+		<span class="eyebrow" style="font-size: 0.6rem;">built &amp; maintained by
+			<a href="https://github.com/rohitjg13" target="_blank" rel="noopener noreferrer" class="underline decoration-1 underline-offset-4 transition-colors" style="color: var(--muted);"
+				onmouseenter={(e) => { (e.currentTarget as HTMLAnchorElement).style.color = 'var(--accent)'; }}
+				onmouseleave={(e) => { (e.currentTarget as HTMLAnchorElement).style.color = 'var(--muted)'; }}
+			>rohit j g</a>
+		</span>
+	</footer>
+</div>

@@ -1000,149 +1000,130 @@
 
 <div class="flex min-h-dvh flex-col" style="background: var(--bg);">
 	<!-- Header -->
-	<header class="flex items-center justify-between px-4 py-3 md:px-8 md:py-4" style="border-bottom: 1px solid var(--border);">
-		<div class="flex items-center gap-3 md:gap-5">
-			<span class="text-lg" style="font-family: var(--font-serif); color: var(--accent);">noodle</span>
-			<span class="hidden text-[9px] uppercase tracking-[0.15em] md:inline" style="color: var(--muted);">{data.user.role === 'super_admin' ? 'admin' : data.user.role}</span>
+	<header class="flex items-center justify-between gap-3 px-4 py-3 md:px-8 md:py-4" style="border-bottom: 1px solid var(--border);">
+		<div class="flex items-center gap-2.5">
+			<span class="grid h-7 w-7 place-items-center rounded-md" style="background: var(--accent); color: var(--on-accent); font-family: var(--font-serif); font-weight: 700; font-size: 1.25rem; line-height: 1;">n</span>
+			<span class="title-md" style="font-size: 1.35rem;">noodle</span>
+			<span class="badge ml-1 hidden sm:inline-flex">{data.user.role === 'super_admin' ? 'admin' : data.user.role}</span>
 		</div>
-		<div class="flex items-center gap-3 md:gap-5">
+		<div class="flex items-center gap-2 md:gap-3">
 			{#if canManage}
 				<button onclick={() => { viewAsStudent = !viewAsStudent; if (viewAsStudent) activeTab = 'preferences'; else activeTab = 'demand'; }}
-					class="cursor-pointer border-none bg-transparent text-[10px] uppercase tracking-[0.12em] transition-colors duration-200"
-					style="color: var(--muted);"
-					onmouseenter={(e) => { e.currentTarget.style.color = 'var(--accent)'; }}
-					onmouseleave={(e) => { e.currentTarget.style.color = 'var(--muted)'; }}
-				>{viewAsStudent ? 'cr view' : 'student view'}</button>
+					class="btn btn-ghost btn-sm" title="Switch between student and CR views">
+					<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M8 3 4 7l4 4"/><path d="M4 7h16"/><path d="m16 21 4-4-4-4"/><path d="M20 17H4"/></svg>
+					<span class="hidden sm:inline">{viewAsStudent ? 'CR view' : 'Student view'}</span>
+				</button>
 			{/if}
 			{#if isSuperAdmin}
-				<a href="/admin" class="text-[10px] uppercase tracking-[0.12em] no-underline transition-colors duration-200" style="color: var(--muted);">admin</a>
+				<a href="/admin" class="linkbtn hidden sm:inline">admin</a>
 			{/if}
-			<span class="hidden text-[10px] tracking-wide md:inline" style="color: var(--muted);">{data.user.email}</span>
-			<button onclick={toggleTheme} title="Toggle light / dark"
-				class="cursor-pointer border-none bg-transparent text-[12px] leading-none transition-colors duration-200"
-				style="color: var(--muted);"
-				onmouseenter={(e) => { e.currentTarget.style.color = 'var(--accent)'; }}
-				onmouseleave={(e) => { e.currentTarget.style.color = 'var(--muted)'; }}
-				aria-label="Toggle theme"
-			>{theme === 'light' ? '☾' : '☀'}</button>
-			<button onclick={signOut}
-				class="cursor-pointer border-none bg-transparent text-[10px] uppercase tracking-[0.12em] transition-colors duration-200"
-				style="color: var(--fg);"
-				onmouseenter={(e) => { e.currentTarget.style.color = 'var(--accent)'; }}
-				onmouseleave={(e) => { e.currentTarget.style.color = 'var(--fg)'; }}
-			>sign out</button>
+			<span class="hidden max-w-[14rem] truncate text-xs md:inline" style="color: var(--muted);">{data.user.email}</span>
+			<button onclick={toggleTheme} title="Toggle light / dark" aria-label="Toggle theme"
+				class="grid h-9 w-9 shrink-0 place-items-center rounded-full border transition-colors duration-200"
+				style="border-color: var(--border); color: var(--muted); background: transparent;"
+				onmouseenter={(e) => { e.currentTarget.style.color = 'var(--accent)'; e.currentTarget.style.borderColor = 'var(--accent)'; }}
+				onmouseleave={(e) => { e.currentTarget.style.color = 'var(--muted)'; e.currentTarget.style.borderColor = 'var(--border)'; }}
+			><span style="font-size: 0.95rem; line-height: 1;">{theme === 'light' ? '☾' : '☀'}</span></button>
+			<button onclick={signOut} class="btn btn-ghost btn-sm">sign out</button>
 		</div>
 	</header>
 
 	<!-- Tabs -->
-	<nav class="flex overflow-x-auto border-b px-4 md:px-8" style="border-color: var(--border);">
+	<nav class="flex gap-5 overflow-x-auto px-4 md:gap-7 md:px-8" style="border-bottom: 1px solid var(--border);">
 		{#if viewAsStudent || !canManage}
-			<button onclick={() => activeTab = 'preferences'}
-				class="cursor-pointer whitespace-nowrap border-none bg-transparent px-3 py-2.5 text-[10px] uppercase tracking-[0.12em]"
-				style="color: {activeTab === 'preferences' ? 'var(--accent)' : 'var(--muted)'}; border-bottom: 1px solid {activeTab === 'preferences' ? 'var(--accent)' : 'transparent'}; margin-bottom: -1px;"
-			>preferences</button>
-			<button onclick={() => activeTab = 'mytimetable'}
-				class="cursor-pointer whitespace-nowrap border-none bg-transparent px-3 py-2.5 text-[10px] uppercase tracking-[0.12em]"
-				style="color: {activeTab === 'mytimetable' ? 'var(--accent)' : 'var(--muted)'}; border-bottom: 1px solid {activeTab === 'mytimetable' ? 'var(--accent)' : 'transparent'}; margin-bottom: -1px;"
-			>my timetable</button>
+			<button onclick={() => activeTab = 'preferences'} class="tab {activeTab === 'preferences' ? 'tab-active' : ''}">preferences</button>
+			<button onclick={() => activeTab = 'mytimetable'} class="tab {activeTab === 'mytimetable' ? 'tab-active' : ''}">my timetable</button>
 		{/if}
 		{#if !viewAsStudent && canManage}
-			<button onclick={() => activeTab = 'demand'}
-				class="relative cursor-pointer whitespace-nowrap border-none bg-transparent px-3 py-2.5 text-[10px] uppercase tracking-[0.12em]"
-				style="color: {activeTab === 'demand' ? 'var(--accent)' : 'var(--muted)'}; border-bottom: 1px solid {activeTab === 'demand' ? 'var(--accent)' : 'transparent'}; margin-bottom: -1px;"
-			>demand{#if notifications.length > 0}<span class="absolute right-1 top-1.5 h-1.5 w-1.5 rounded-full" style="background: var(--accent);"></span>{/if}</button>
-			<button onclick={() => activeTab = 'timetable'}
-				class="cursor-pointer whitespace-nowrap border-none bg-transparent px-3 py-2.5 text-[10px] uppercase tracking-[0.12em]"
-				style="color: {activeTab === 'timetable' ? 'var(--accent)' : 'var(--muted)'}; border-bottom: 1px solid {activeTab === 'timetable' ? 'var(--accent)' : 'transparent'}; margin-bottom: -1px;"
-			>timetable</button>
-			<button onclick={() => activeTab = 'settings'}
-				class="cursor-pointer whitespace-nowrap border-none bg-transparent px-3 py-2.5 text-[10px] uppercase tracking-[0.12em]"
-				style="color: {activeTab === 'settings' ? 'var(--accent)' : 'var(--muted)'}; border-bottom: 1px solid {activeTab === 'settings' ? 'var(--accent)' : 'transparent'}; margin-bottom: -1px;"
-			>constraints</button>
+			<button onclick={() => activeTab = 'demand'} class="tab {activeTab === 'demand' ? 'tab-active' : ''}">demand{#if notifications.length > 0}<span class="absolute -right-2.5 top-2.5 h-1.5 w-1.5 rounded-full" style="background: var(--accent);"></span>{/if}</button>
+			<button onclick={() => activeTab = 'timetable'} class="tab {activeTab === 'timetable' ? 'tab-active' : ''}">timetable</button>
+			<button onclick={() => activeTab = 'settings'} class="tab {activeTab === 'settings' ? 'tab-active' : ''}">constraints</button>
 		{/if}
 	</nav>
 
 	<!-- Content -->
-	<main class="flex-1 px-4 py-6 md:px-8 md:py-8">
+	<main class="flex-1 px-4 py-8 md:px-8 md:py-12">
 
 		<!-- ==================== STUDENT: PREFERENCES ==================== -->
 		{#if activeTab === 'preferences'}
-			<div class="mx-auto flex w-full max-w-lg flex-col gap-8">
-				<!-- Profile -->
-				<div class="flex flex-col gap-3">
-					<h2 class="text-lg" style="font-family: var(--font-serif); color: var(--accent);">your profile</h2>
-					<div class="grid grid-cols-2 gap-2">
-						{#each [['name', data.user.name], ['email', data.user.email], ['role', data.user.role]] as [label, value]}
-							<div class="flex flex-col gap-0.5 border px-3 py-3" style="border-color: var(--border);">
-								<span class="text-[10px] uppercase tracking-[0.1em]" style="color: var(--muted);">{label}</span>
-								<span class="text-sm truncate" style="color: var(--fg);">{value}</span>
-							</div>
-						{/each}
-					</div>
+			<div class="animate-in mx-auto flex w-full max-w-5xl flex-col gap-6">
+				<div class="flex flex-col gap-1.5">
+					<h1 class="title-xl">Your preferences</h1>
+					<p class="hint">Tell us your batch and the electives you'd like — your class rep uses this to build the timetable.</p>
 				</div>
 
-				<div class="h-px" style="background: var(--border);"></div>
+				<div class="grid gap-5 lg:grid-cols-[340px_minmax(0,1fr)] lg:items-start lg:gap-x-8 lg:gap-y-6">
+				<div class="flex min-w-0 flex-col gap-5">
+				<!-- Profile strip -->
+				<div class="flex items-center gap-3 rounded-xl border px-3 py-2.5" style="border-color: var(--border); background: var(--surface);">
+					<div class="grid h-10 w-10 shrink-0 place-items-center rounded-full" style="background: var(--accent); color: var(--on-accent); font-family: var(--font-serif); font-weight: 700; font-size: 1.2rem;">{(data.user.name ?? '?').charAt(0).toUpperCase()}</div>
+					<div class="min-w-0 flex-1">
+						<p class="truncate font-semibold" style="color: var(--fg);">{data.user.name}</p>
+						<p class="truncate text-sm" style="color: var(--muted);">{data.user.email}</p>
+					</div>
+					<span class="badge">{data.user.role}</span>
+				</div>
 
-				<!-- Batch setup / editor -->
-				<div class="flex flex-col gap-4">
-					<div class="flex items-center justify-between">
-						<div>
-							<h2 class="text-lg" style="font-family: var(--font-serif); color: var(--accent);">your batch</h2>
-							{#if !studentBatch}<p class="text-[9px] uppercase tracking-[0.08em] mt-0.5" style="color: #e44;">required before submitting preferences</p>{/if}
-						</div>
-						{#if studentBatch && !editingBatch}
-							<button onclick={() => editingBatch = true}
-								class="cursor-pointer border-none bg-transparent text-[9px] uppercase tracking-[0.12em] transition-colors duration-150"
-								style="color: var(--muted);"
-								onmouseenter={(e) => { e.currentTarget.style.color = 'var(--accent)'; }}
-								onmouseleave={(e) => { e.currentTarget.style.color = 'var(--muted)'; }}
-							>edit</button>
+				<!-- Step 1: batch -->
+				<div class="card flex flex-col {editingBatch || !studentBatch ? 'card-pad gap-4' : 'px-5 py-4'}">
+					<div class="flex flex-wrap items-center gap-x-3 gap-y-2">
+						<span class="step-num">1</span>
+						<h2 class="title-md">Your batch</h2>
+						{#if !editingBatch && studentBatch}
+							<div class="flex flex-wrap gap-1.5">
+								{#each studentBatch.split(',').map(b => b.trim()).filter(Boolean) as b}
+									<span class="badge" style="color: var(--fg); font-size: 0.7rem;">{b}</span>
+								{/each}
+							</div>
+						{/if}
+						<div class="flex-1"></div>
+						{#if !studentBatch}
+							<span class="badge" style="color: #d8593f; border-color: color-mix(in srgb, #d8593f 45%, var(--border));">required</span>
+						{:else if !editingBatch}
+							<button onclick={() => editingBatch = true} class="linkbtn">edit</button>
 						{/if}
 					</div>
 
-					{#if !editingBatch && studentBatch}
-						<!-- Saved batch display -->
-						<div class="flex flex-wrap gap-1.5">
-							{#each studentBatch.split(',').map(b => b.trim()).filter(Boolean) as b}
-								<span class="border px-2.5 py-1 text-[9px] uppercase tracking-[0.1em]" style="border-color: var(--border); color: var(--fg);">{b}</span>
-							{/each}
-						</div>
-					{:else}
-						<!-- Batch input editor -->
-						<div class="flex flex-col gap-2">
-							<p class="text-[9px] leading-relaxed" style="color: var(--muted);">select all your batches — e.g. ECE 2nd years have both <span style="color: var(--fg);">ELC2X</span> and <span style="color: var(--fg);">ELC2YR</span></p>
+					{#if editingBatch || !studentBatch}
+						<div class="flex flex-col gap-3">
+							<p class="hint">Add every batch code you belong to — e.g. ECE 2nd years have both <span style="color: var(--fg); font-weight: 600;">ELC2X</span> and <span style="color: var(--fg); font-weight: 600;">ELC2YR</span>.</p>
 							{#each batchInputs as input, i}
 								{@const isValid = allBatches().includes(batchInputs[i].trim().toUpperCase())}
-								<div class="relative flex gap-2">
-									<input
-										type="text"
-										bind:value={batchInputs[i]}
-										oninput={() => onBatchInput(i)}
-										onfocus={() => onBatchInput(i)}
-										onblur={() => setTimeout(() => { batchSuggestions[i] = []; batchSuggestions = [...batchSuggestions]; }, 150)}
-										placeholder="e.g. ELC21"
-										autocomplete="off"
-										class="flex-1 bg-transparent px-3 py-2.5 text-xs uppercase outline-none transition-all duration-200"
-										style="border: {isValid ? '1px dashed #22c55e' : '1px solid var(--border)'}; color: var(--fg);"
-									/>
+								<div class="relative flex items-center gap-2">
+									<div class="relative flex-1">
+										<input
+											type="text"
+											bind:value={batchInputs[i]}
+											oninput={() => onBatchInput(i)}
+											onfocus={() => onBatchInput(i)}
+											onblur={() => setTimeout(() => { batchSuggestions[i] = []; batchSuggestions = [...batchSuggestions]; }, 150)}
+											placeholder="e.g. ELC21"
+											autocomplete="off"
+											class="input uppercase"
+											style={isValid ? 'border-color: #22c55e; padding-right: 2.2rem;' : ''}
+										/>
+										{#if isValid}
+											<svg class="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2" width="14" height="14" viewBox="0 0 16 16" fill="none" aria-hidden="true"><path d="M3 8.5 6.5 12 13 4.5" stroke="#22c55e" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+										{/if}
+									</div>
 									{#if batchInputs.length > 1}
-										<button onclick={() => removeBatchInput(i)}
-											class="cursor-pointer border-none bg-transparent px-3 py-2 text-base transition-colors duration-200"
-											style="color: var(--muted);"
-											onmouseenter={(e) => { e.currentTarget.style.color = '#e44'; }}
-											onmouseleave={(e) => { e.currentTarget.style.color = 'var(--muted)'; }}
+										<button onclick={() => removeBatchInput(i)} aria-label="Remove batch"
+											class="grid h-9 w-9 shrink-0 place-items-center rounded-md border transition-colors duration-150"
+											style="border-color: var(--border); color: var(--muted);"
+											onmouseenter={(e) => { e.currentTarget.style.color = '#d8593f'; e.currentTarget.style.borderColor = '#d8593f'; }}
+											onmouseleave={(e) => { e.currentTarget.style.color = 'var(--muted)'; e.currentTarget.style.borderColor = 'var(--border)'; }}
 										>&times;</button>
 									{/if}
 									{#if batchSuggestions[i]?.length}
-										<div class="absolute left-0 top-full z-10 mt-0.5 max-h-40 w-full overflow-y-auto border"
-											style="background: var(--surface); border-color: var(--border);">
+										<div class="card absolute left-0 top-full z-10 mt-1 max-h-44 w-full overflow-y-auto p-1"
+											style="box-shadow: var(--shadow-lg);">
 											{#each batchSuggestions[i] as suggestion}
 												<button
 													onmousedown={() => selectBatchSuggestion(i, suggestion)}
 													ontouchstart={() => selectBatchSuggestion(i, suggestion)}
-													class="block w-full cursor-pointer border-none bg-transparent px-3 py-3 text-left text-xs uppercase tracking-[0.1em] transition-colors duration-100"
+													class="block w-full cursor-pointer rounded-md border-none bg-transparent px-3 py-2.5 text-left text-sm uppercase transition-colors duration-100"
 													style="color: var(--muted);"
-													onmouseenter={(e) => { e.currentTarget.style.background = 'var(--border)'; e.currentTarget.style.color = 'var(--accent)'; }}
+													onmouseenter={(e) => { e.currentTarget.style.background = 'var(--tint)'; e.currentTarget.style.color = 'var(--fg)'; }}
 													onmouseleave={(e) => { e.currentTarget.style.background = 'transparent'; e.currentTarget.style.color = 'var(--muted)'; }}
 												>{suggestion}</button>
 											{/each}
@@ -1150,109 +1131,108 @@
 									{/if}
 								</div>
 							{/each}
-							<div class="flex items-center gap-3 mt-1">
+							<div class="mt-1 flex items-center gap-3">
 								{#if batchInputs.length < 4}
-									<button onclick={addBatchInput}
-										class="cursor-pointer border-none bg-transparent text-[9px] uppercase tracking-[0.1em] transition-colors duration-150"
-										style="color: var(--muted);"
-										onmouseenter={(e) => { e.currentTarget.style.color = 'var(--accent)'; }}
-										onmouseleave={(e) => { e.currentTarget.style.color = 'var(--muted)'; }}
-									>+ add batch</button>
+									<button onclick={addBatchInput} class="linkbtn">+ add another batch</button>
 								{/if}
 								<div class="flex-1"></div>
 								{#if studentBatch && editingBatch}
 									<button onclick={() => { editingBatch = false; batchInputs = studentBatch.split(',').map(b => b.trim()).filter(Boolean); batchSuggestions = batchInputs.map(() => []); }}
-										class="cursor-pointer border-none bg-transparent text-[9px] uppercase tracking-[0.12em] transition-colors duration-150"
-										style="color: var(--muted);"
-									>cancel</button>
+										class="btn btn-ghost btn-sm">cancel</button>
 								{/if}
-								<button onclick={saveBatch} disabled={batchSubmitting}
-									class="cursor-pointer border px-4 py-2 text-[9px] uppercase tracking-[0.15em] transition-all duration-200 disabled:opacity-30"
-									style="border-color: var(--muted); color: var(--fg); background: transparent;"
-									onmouseenter={(e) => { e.currentTarget.style.borderColor = 'var(--accent)'; e.currentTarget.style.color = 'var(--accent)'; }}
-									onmouseleave={(e) => { e.currentTarget.style.borderColor = 'var(--muted)'; e.currentTarget.style.color = 'var(--fg)'; }}
-								>{batchSubmitting ? 'saving...' : 'save batch'}</button>
+								<button onclick={saveBatch} disabled={batchSubmitting} class="btn btn-primary btn-sm">{batchSubmitting ? 'saving…' : 'save batch'}</button>
 							</div>
 						</div>
 					{/if}
 				</div>
 
-				<div class="h-px" style="background: var(--border);"></div>
-
-				<!-- Preference form — gated behind batch -->
+				<!-- helper tip -->
+				<div class="card flex items-start gap-2.5 px-4 py-3.5">
+					<svg width="16" height="16" class="mt-0.5 shrink-0" viewBox="0 0 24 24" fill="none" stroke="var(--accent)" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M12 16v-4M12 8h.01"/></svg>
+					<p class="hint" style="font-size: 0.8rem;">You can update these any time until your class rep locks preferences. Rank by genuine interest — it helps your CR resolve clashes.</p>
+				</div>
+				</div>
+				<div class="flex min-w-0 flex-col gap-5">
+				<!-- Step 2: course preferences — gated behind batch -->
 				{#if !studentBatch}
-					<div class="flex flex-col items-center gap-3 py-6" style="border: 1px dashed var(--border);">
-						<p class="text-xs" style="color: var(--muted);">set your batch above to unlock course preferences</p>
+					<div class="card card-pad flex items-center gap-3" style="border-style: dashed;">
+						<svg width="20" height="20" class="shrink-0" viewBox="0 0 24 24" fill="none" stroke="var(--muted)" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>
+						<p class="hint">Save your batch above to unlock course preferences.</p>
 					</div>
 				{:else}
-					<div class="flex flex-col gap-5">
-						<div class="flex items-center justify-between">
-							<h2 class="text-lg" style="font-family: var(--font-serif); color: var(--accent);">course preferences</h2>
-							{#if locked}
-								<span class="border px-2.5 py-1 text-[9px] uppercase tracking-[0.12em]" style="border-color: var(--border); color: var(--muted);">locked</span>
-							{/if}
+					<div class="card card-pad flex flex-col gap-5">
+						<div class="flex items-center gap-3">
+							<span class="step-num">2</span>
+							<div class="min-w-0 flex-1"><h2 class="title-md">Course preferences</h2></div>
+							{#if locked}<span class="badge">🔒 locked</span>{/if}
 						</div>
 
 						{#if loadingCourses}
-							<p class="text-xs animate-pulse" style="color: var(--muted);">loading courses...</p>
+							<p class="hint animate-pulse">Loading courses…</p>
 						{:else}
-							<div class="flex flex-col gap-2">
-								<span class="text-[9px] uppercase tracking-[0.1em]" style="color: var(--muted);">minor (optional)</span>
-								<select bind:value={minor} disabled={locked}
-									class="border bg-transparent px-3 py-3 text-sm outline-none disabled:opacity-30"
-									style="border-color: var(--border); color: var(--fg); background: var(--bg);">
+							<div class="flex flex-col">
+								<label for="pref-minor" class="field-label">Minor <span style="color: var(--muted); font-weight: 400;">· optional</span></label>
+								<select id="pref-minor" bind:value={minor} disabled={locked}
+									class="select disabled:opacity-40">
 									<option value="">— none —</option>
 									{#each minorPrograms as p}<option value={p}>{p}</option>{/each}
 								</select>
 							</div>
 
-							<label class="flex cursor-pointer items-center gap-2 {locked ? 'opacity-30' : ''}">
-								<input type="checkbox" checked={minorOnly} disabled={locked} class="accent-white"
+							<label class="flex cursor-pointer items-center gap-3 rounded-lg border p-3 transition-colors {locked ? 'opacity-40' : ''}" style="border-color: {minorOnly ? 'var(--accent)' : 'var(--border)'}; background: {minorOnly ? 'var(--tint)' : 'transparent'};">
+								<input type="checkbox" checked={minorOnly} disabled={locked} style="accent-color: var(--accent); width: 1.05rem; height: 1.05rem;"
 									onchange={(e) => { minorOnly = e.currentTarget.checked; if (minorOnly) { uwePref1 = ''; uwePref2 = ''; uwePref3 = ''; } }} />
-								<span class="text-[9px] uppercase tracking-[0.1em]" style="color: var(--muted);">minor only — i don't want a uwe</span>
+								<span class="text-sm" style="color: var(--fg);">Minor only — I don't want a UWE elective</span>
 							</label>
 
-							{#each minorOnly ? [] : [{ l: 'uwe pref 1 (highest)', v: uwePref1, s: (x: string) => uwePref1 = x }, { l: 'uwe pref 2', v: uwePref2, s: (x: string) => uwePref2 = x }, { l: 'uwe pref 3 (lowest)', v: uwePref3, s: (x: string) => uwePref3 = x }] as pref}
-								<div class="flex flex-col gap-2">
-									<span class="text-xs uppercase tracking-[0.1em]" style="color: var(--muted);">{pref.l}</span>
-									<select value={pref.v} onchange={(e) => pref.s(e.currentTarget.value)} disabled={locked}
-										class="border bg-transparent px-3 py-3 text-sm outline-none disabled:opacity-30"
-										style="border-color: var(--border); color: var(--fg); background: var(--bg);">
-										<option value="">— select —</option>
-										{#each uweCourseOptions as c}<option value={c.courseCode.split('-')[0]}>{c.courseCode.split('-')[0]} — {c.courseName}</option>{/each}
-									</select>
+							{#if !minorOnly}
+								<div class="flex flex-col gap-3">
+									<div class="flex items-baseline justify-between gap-3">
+										<span class="field-label" style="margin: 0;">Rank your electives</span>
+										<span class="eyebrow" style="font-size: 0.58rem;">1 = most wanted</span>
+									</div>
+									{#each [{ v: uwePref1, s: (x: string) => uwePref1 = x }, { v: uwePref2, s: (x: string) => uwePref2 = x }, { v: uwePref3, s: (x: string) => uwePref3 = x }] as pref, i}
+										<div class="flex items-center gap-3">
+											<span class="rank-num">{i + 1}</span>
+											<select aria-label="Elective choice {i + 1}" value={pref.v} onchange={(e) => pref.s(e.currentTarget.value)} disabled={locked}
+												class="select flex-1 disabled:opacity-40">
+												<option value="">{i === 0 ? '— first choice —' : i === 1 ? '— second choice —' : '— third choice —'}</option>
+												{#each uweCourseOptions as c}<option value={c.courseCode.split('-')[0]}>{c.courseCode.split('-')[0]} — {c.courseName}</option>{/each}
+											</select>
+										</div>
+									{/each}
 								</div>
-							{/each}
+							{/if}
 
-							{#if prefError}<p class="text-xs" style="color: #e44;">{prefError}</p>{/if}
-							{#if prefSuccess}<p class="text-xs" style="color: #4e4;">{prefSuccess}</p>{/if}
+							{#if prefError}<p class="flex items-center gap-2 text-sm" style="color: #d8593f;"><span>⚠</span>{prefError}</p>{/if}
+							{#if prefSuccess}<p class="flex items-center gap-2 text-sm" style="color: #3fa463;"><span>✓</span>{prefSuccess}</p>{/if}
 
 							{#if !locked}
-								<button onclick={submitPreferences} disabled={submitting}
-									class="mt-1 w-full cursor-pointer border px-5 py-3.5 text-xs uppercase tracking-[0.2em] transition-all duration-300 hover:tracking-[0.25em] disabled:opacity-30 disabled:cursor-wait"
-									style="background: transparent; border-color: var(--border); color: var(--muted);"
-									onmouseenter={(e) => { e.currentTarget.style.borderColor = 'var(--muted)'; e.currentTarget.style.color = 'var(--accent)'; }}
-									onmouseleave={(e) => { e.currentTarget.style.borderColor = 'var(--border)'; e.currentTarget.style.color = 'var(--muted)'; }}
-								>{submitting ? 'saving...' : data.preference ? 'update preferences' : 'submit preferences'}</button>
+								<button onclick={submitPreferences} disabled={submitting} class="btn btn-primary btn-block" style="padding-top: 0.85rem; padding-bottom: 0.85rem;">{submitting ? 'saving…' : data.preference ? 'update preferences' : 'submit preferences'}</button>
 							{:else}
-								<p class="text-xs uppercase tracking-[0.12em]" style="color: var(--muted);">editing is locked by your class rep</p>
+								<p class="hint">Editing is locked by your class rep.</p>
 							{/if}
 						{/if}
 					</div>
 				{/if}
+				</div>
+				</div>
 			</div>
 
 		<!-- ==================== STUDENT: MY TIMETABLE ==================== -->
 		{:else if activeTab === 'mytimetable'}
-			<div class="mx-auto flex w-full max-w-4xl flex-col gap-6">
-				<!-- Batch selector -->
-				<div class="flex flex-col gap-3">
-					<h2 class="text-lg" style="font-family: var(--font-serif); color: var(--accent);">my timetable</h2>
-					<p class="text-[9px] uppercase tracking-[0.1em]" style="color: var(--muted);">{selectedBatches.length ? selectedBatches.join(', ') : 'enter your batch code(s) to view your schedule'}</p>
+			<div class="animate-in mx-auto flex w-full max-w-5xl flex-col gap-6">
+				<div class="flex flex-col gap-1">
+					<h1 class="title-xl">My timetable</h1>
+					<p class="hint">{selectedBatches.length ? 'Your weekly schedule across the batches below.' : 'Enter your batch code(s) and load to see your weekly schedule.'}</p>
+				</div>
 
-					<div class="flex flex-col gap-2">
+				<!-- Batch selector -->
+				<div class="card card-pad flex flex-col gap-3 lg:max-w-2xl">
+					<span class="eyebrow">Batches</span>
+					<div class="grid gap-2" style="grid-template-columns: repeat(auto-fill, minmax(132px, 1fr));">
 						{#each batchInputs as input, i}
-							<div class="relative flex gap-2">
+							<div class="relative flex items-center gap-2">
 								<input
 									type="text"
 									bind:value={batchInputs[i]}
@@ -1261,28 +1241,26 @@
 									onblur={() => setTimeout(() => { batchSuggestions[i] = []; batchSuggestions = [...batchSuggestions]; }, 150)}
 									placeholder="e.g. CSE2X"
 									autocomplete="off"
-									class="flex-1 border bg-transparent px-3 py-2.5 text-xs uppercase outline-none transition-colors duration-200 focus:border-[var(--muted)]"
-									style="border-color: var(--border); color: var(--fg);"
+									class="input uppercase"
 								/>
 								{#if batchInputs.length > 1}
-									<button onclick={() => removeBatchInput(i)}
-										class="cursor-pointer border-none bg-transparent px-3 py-2 text-base transition-colors duration-200"
-										style="color: var(--muted);"
-										onmouseenter={(e) => { e.currentTarget.style.color = '#e44'; }}
-										onmouseleave={(e) => { e.currentTarget.style.color = 'var(--muted)'; }}
+									<button onclick={() => removeBatchInput(i)} aria-label="Remove batch"
+										class="grid h-9 w-9 shrink-0 place-items-center rounded-md border transition-colors duration-150"
+										style="border-color: var(--border); color: var(--muted);"
+										onmouseenter={(e) => { e.currentTarget.style.color = '#d8593f'; e.currentTarget.style.borderColor = '#d8593f'; }}
+										onmouseleave={(e) => { e.currentTarget.style.color = 'var(--muted)'; e.currentTarget.style.borderColor = 'var(--border)'; }}
 									>&times;</button>
 								{/if}
 								<!-- Suggestions dropdown -->
 								{#if batchSuggestions[i]?.length}
-									<div class="absolute left-0 top-full z-10 mt-0.5 max-h-40 w-full overflow-y-auto border"
-										style="background: var(--surface); border-color: var(--border);">
+									<div class="card absolute left-0 top-full z-10 mt-1 max-h-44 w-full overflow-y-auto p-1" style="box-shadow: var(--shadow-lg);">
 										{#each batchSuggestions[i] as suggestion}
 											<button
 												onmousedown={() => selectBatchSuggestion(i, suggestion)}
 												ontouchstart={() => selectBatchSuggestion(i, suggestion)}
-												class="block w-full cursor-pointer border-none bg-transparent px-3 py-3 text-left text-xs uppercase tracking-[0.1em] transition-colors duration-100"
+												class="block w-full cursor-pointer rounded-md border-none bg-transparent px-3 py-2.5 text-left text-sm uppercase transition-colors duration-100"
 												style="color: var(--muted);"
-												onmouseenter={(e) => { e.currentTarget.style.background = 'var(--border)'; e.currentTarget.style.color = 'var(--accent)'; }}
+												onmouseenter={(e) => { e.currentTarget.style.background = 'var(--tint)'; e.currentTarget.style.color = 'var(--fg)'; }}
 												onmouseleave={(e) => { e.currentTarget.style.background = 'transparent'; e.currentTarget.style.color = 'var(--muted)'; }}
 											>{suggestion}</button>
 										{/each}
@@ -1292,27 +1270,18 @@
 						{/each}
 					</div>
 
-					<div class="flex gap-3">
+					<div class="flex items-center gap-3">
 						{#if batchInputs.length < 4}
-							<button onclick={addBatchInput}
-								class="cursor-pointer border-none bg-transparent text-[9px] uppercase tracking-[0.12em] transition-colors duration-200"
-								style="color: var(--muted);"
-								onmouseenter={(e) => { e.currentTarget.style.color = 'var(--accent)'; }}
-								onmouseleave={(e) => { e.currentTarget.style.color = 'var(--muted)'; }}
-							>+ add batch</button>
+							<button onclick={addBatchInput} class="linkbtn">+ add batch</button>
 						{/if}
-						<button onclick={loadBatches}
-							class="cursor-pointer border px-4 py-2 text-[9px] uppercase tracking-[0.15em] transition-all duration-200"
-							style="background: transparent; border-color: var(--border); color: var(--muted);"
-							onmouseenter={(e) => { e.currentTarget.style.color = 'var(--accent)'; }}
-							onmouseleave={(e) => { e.currentTarget.style.color = 'var(--muted)'; }}
-						>load</button>
+						<div class="flex-1"></div>
+						<button onclick={loadBatches} class="btn btn-primary btn-sm">load timetable</button>
 					</div>
 
 					{#if selectedBatches.length}
-						<div class="flex flex-wrap gap-1.5">
+						<div class="flex flex-wrap gap-2 border-t pt-3" style="border-color: var(--border);">
 							{#each selectedBatches as b}
-								<span class="border px-2 py-1 text-[9px] uppercase tracking-[0.1em]" style="border-color: var(--border); color: var(--fg);">{b}</span>
+								<span class="badge" style="color: var(--fg);">{b}</span>
 							{/each}
 						</div>
 					{/if}
@@ -1320,7 +1289,7 @@
 
 				<!-- Timetable grid -->
 				{#if selectedBatches.length && studentBlocks().length}
-					<div class="overflow-x-auto -mx-4 px-4 md:mx-0 md:px-0">
+					<div class="nood-mono overflow-x-auto -mx-4 px-4 md:mx-0 md:px-0">
 						<div class="min-w-[600px]">
 							<div class="grid" style="grid-template-columns: 50px repeat({DAYS.length}, 1fr); border: 1px solid var(--border);">
 								<div style="border-bottom: 1px solid var(--border); border-right: 1px solid var(--border);"></div>
@@ -1359,45 +1328,41 @@
 						</div>
 					</div>
 				{:else if selectedBatches.length}
-					<p class="text-center text-xs py-8" style="color: var(--muted);">no courses found for these batches</p>
+					<div class="card card-pad text-center">
+						<p class="hint">No courses found for these batches — double-check the codes above.</p>
+					</div>
 				{/if}
 			</div>
 
 		<!-- ==================== CR: DEMAND ==================== -->
 		{:else if activeTab === 'demand'}
-			<div class="flex flex-col gap-6">
+			<div class="animate-in mx-auto flex w-full max-w-5xl flex-col gap-6">
 				{#if notifications.length > 0}
 					<div class="flex flex-col gap-2">
 						{#each notifications as notif (notif.id)}
-							<div class="flex items-start justify-between gap-3 border px-4 py-3" style="border-color: var(--accent); border-left-width: 3px;">
+							<div class="card flex items-start justify-between gap-3 px-4 py-3" style="border-left: 3px solid var(--accent);">
 								<div class="flex flex-col gap-0.5">
-									<p class="text-[11px] tracking-wide" style="color: var(--fg);">{notif.message}</p>
-									<p class="text-[9px] uppercase tracking-[0.1em]" style="color: var(--muted);">{browser ? relativeTime(notif.createdAt) : ''}</p>
+									<p class="text-sm" style="color: var(--fg);">{notif.message}</p>
+									<p class="eyebrow" style="font-size: 0.58rem;">{browser ? relativeTime(notif.createdAt) : ''}</p>
 								</div>
-								<button
-									onclick={() => dismissNotification(notif.id)}
-									class="shrink-0 cursor-pointer border-none bg-transparent text-[10px] uppercase tracking-[0.12em] transition-colors duration-200"
-									style="color: var(--muted);"
-									onmouseenter={(e) => { e.currentTarget.style.color = 'var(--accent)'; }}
-									onmouseleave={(e) => { e.currentTarget.style.color = 'var(--muted)'; }}
-								>dismiss</button>
+								<button onclick={() => dismissNotification(notif.id)} class="linkbtn shrink-0">dismiss</button>
 							</div>
 						{/each}
 					</div>
 				{/if}
-				<div class="flex flex-col gap-1 md:flex-row md:items-center md:justify-between">
-					<div>
-						<h2 class="text-lg" style="font-family: var(--font-serif); color: var(--accent);">uwe demand</h2>
-						<p class="text-[9px] uppercase tracking-[0.1em]" style="color: var(--muted);">{totalStudents} submitted</p>
+				<div class="flex flex-col gap-3 md:flex-row md:items-end md:justify-between">
+					<div class="flex flex-col gap-1">
+						<h1 class="title-xl">Elective demand</h1>
+						<p class="hint">Electives students want, and whether each clashes with your batch timetable. <span style="color: var(--fg); font-weight: 600;">{totalStudents}</span> submitted.</p>
 					</div>
-					<div class="flex gap-3 mt-2 md:mt-0">
-						<button onclick={toggleLockAll} disabled={lockSubmitting}
-							class="cursor-pointer border px-3 py-2 text-[9px] uppercase tracking-[0.12em] transition-all duration-200 disabled:opacity-50 disabled:cursor-not-allowed"
-							style="background: transparent; border-color: {locked ? '#e44' : 'var(--border)'}; color: {locked ? '#e44' : 'var(--muted)'};"
-							onmouseenter={(e) => { if (!lockSubmitting) e.currentTarget.style.color = 'var(--accent)'; }}
-							onmouseleave={(e) => { e.currentTarget.style.color = locked ? '#e44' : 'var(--muted)'; }}
-						>{lockSubmitting ? (locked ? 'unlocking...' : 'locking...') : (locked ? 'unlock editing' : 'lock preferences')}</button>
-					</div>
+					<button onclick={toggleLockAll} disabled={lockSubmitting} class="btn btn-sm {locked ? 'btn-danger' : 'btn-ghost'}">
+						{#if locked}
+							<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 9.9-1"/></svg>
+						{:else}
+							<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>
+						{/if}
+						{lockSubmitting ? (locked ? 'unlocking…' : 'locking…') : (locked ? 'unlock editing' : 'lock preferences')}
+					</button>
 				</div>
 
 				{#if loadingCR}
@@ -1419,25 +1384,25 @@
 						</div>
 					{/if}
 
-					<div class="overflow-x-auto -mx-4 md:mx-0">
-						<table class="w-full min-w-[480px] text-left text-xs" style="border-collapse: collapse;">
+					<div class="card nood-mono overflow-x-auto">
+						<table class="w-full min-w-[540px] text-left text-sm" style="border-collapse: collapse;">
 							<thead>
 								<tr style="border-bottom: 1px solid var(--border);">
-									<th class="px-3 py-2 text-[9px] uppercase tracking-[0.1em] font-normal" style="color: var(--muted);">course</th>
-									<th class="px-3 py-2 text-[9px] uppercase tracking-[0.1em] font-normal" style="color: var(--muted);">p1/p2/p3</th>
-									<th class="px-3 py-2 text-[9px] uppercase tracking-[0.1em] font-normal cursor-pointer select-none whitespace-nowrap"
+									<th class="px-4 py-3 text-xs font-semibold uppercase tracking-wider" style="color: var(--muted);">course</th>
+									<th class="px-4 py-3 text-xs font-semibold uppercase tracking-wider" style="color: var(--muted);">p1/p2/p3</th>
+									<th class="px-4 py-3 text-xs font-semibold uppercase tracking-wider cursor-pointer select-none whitespace-nowrap"
 										style="color: {demandSort === 'score' ? 'var(--accent)' : 'var(--muted)'};"
 										onclick={() => { if (demandSort === 'score') demandSortDir = demandSortDir === 'desc' ? 'asc' : 'desc'; else { demandSort = 'score'; demandSortDir = 'desc'; } }}
 									>score <span style="display: inline-block; width: 0.75em; text-align: center;">{demandSort === 'score' ? (demandSortDir === 'desc' ? '↓' : '↑') : ''}</span></th>
-									<th class="px-3 py-2 text-[9px] uppercase tracking-[0.1em] font-normal cursor-pointer select-none whitespace-nowrap"
+									<th class="px-4 py-3 text-xs font-semibold uppercase tracking-wider cursor-pointer select-none whitespace-nowrap"
 										style="color: {demandSort === 'total' ? 'var(--accent)' : 'var(--muted)'};"
 										onclick={() => { if (demandSort === 'total') demandSortDir = demandSortDir === 'desc' ? 'asc' : 'desc'; else { demandSort = 'total'; demandSortDir = 'desc'; } }}
 									>interested <span style="display: inline-block; width: 0.75em; text-align: center;">{demandSort === 'total' ? (demandSortDir === 'desc' ? '↓' : '↑') : ''}</span></th>
-									<th class="px-3 py-2 text-[9px] uppercase tracking-[0.1em] font-normal cursor-pointer select-none whitespace-nowrap"
+									<th class="px-4 py-3 text-xs font-semibold uppercase tracking-wider cursor-pointer select-none whitespace-nowrap"
 										style="color: {demandSort === 'conflict' ? 'var(--accent)' : 'var(--muted)'};"
 										onclick={() => { if (demandSort === 'conflict') demandSortDir = demandSortDir === 'desc' ? 'asc' : 'desc'; else { demandSort = 'conflict'; demandSortDir = 'asc'; } }}
 									>conflicts <span style="display: inline-block; width: 0.75em; text-align: center;">{demandSort === 'conflict' ? (demandSortDir === 'desc' ? '↓' : '↑') : ''}</span></th>
-									<th class="px-3 py-2 text-[9px] uppercase tracking-[0.1em] font-normal" style="color: var(--muted);">status</th>
+									<th class="px-4 py-3 text-xs font-semibold uppercase tracking-wider" style="color: var(--muted);">status</th>
 								</tr>
 							</thead>
 							<tbody>
@@ -1495,7 +1460,7 @@
 
 					<!-- Minor demand -->
 					<div class="flex flex-col gap-3 pt-4" style="border-top: 1px solid var(--border);">
-						<h2 class="text-lg" style="font-family: var(--font-serif); color: var(--accent);">minor demand</h2>
+						<h2 class="title-md">minor demand</h2>
 						{#if minorDemand.length}
 							<div class="flex flex-col">
 								{#each minorDemand as item}
@@ -1514,7 +1479,7 @@
 
 		<!-- ==================== CR: TIMETABLE ==================== -->
 		{:else if activeTab === 'timetable'}
-			<div class="flex flex-col gap-5">
+			<div class="nood-mono flex flex-col gap-5">
 				<div class="flex flex-wrap items-start justify-between gap-2">
 					<div class="min-w-0">
 						<h2 class="text-lg" style="font-family: var(--font-serif); color: var(--accent);">weekly schedule</h2>
@@ -1813,97 +1778,90 @@
 
 		<!-- ==================== CR: CONSTRAINTS ==================== -->
 		{:else if activeTab === 'settings'}
-			<div class="mx-auto flex w-full max-w-xl flex-col gap-8">
-				<div>
-					<h2 class="text-lg" style="font-family: var(--font-serif); color: var(--accent);">professor constraints</h2>
-					<p class="text-[9px] uppercase tracking-[0.1em]" style="color: var(--muted);">blocked slots prevent drag-drop scheduling</p>
+			<div class="animate-in mx-auto flex w-full max-w-5xl flex-col gap-6">
+				<div class="flex flex-col gap-1">
+					<h1 class="title-xl">Professor constraints</h1>
+					<p class="hint">Block the times a professor is unavailable. Blocked slots refuse a class when you drag it there on the timetable.</p>
 				</div>
 
+				<div class="grid gap-5 lg:grid-cols-2 lg:items-start">
 				<!-- Add form -->
-				<div class="flex flex-col gap-3 border p-4" style="border-color: var(--border);">
-					<div class="flex flex-col gap-1">
-						<span class="text-[9px] uppercase tracking-[0.1em]" style="color: var(--muted);">professor — search by name or course code</span>
+				<div class="card card-pad flex flex-col gap-4">
+					<div class="flex flex-col">
+						<label for="prof-input" class="field-label">Professor <span style="color: var(--muted); font-weight: 400;">— search by name or course code</span></label>
 						<div class="relative">
-							<input bind:value={profName} placeholder="e.g. Sharma or ECE204"
+							<input id="prof-input" bind:value={profName} placeholder="e.g. Sharma or ECE204"
 								autocomplete="off"
 								oninput={() => profSuggestOpen = true}
 								onfocus={() => profSuggestOpen = true}
 								onblur={() => setTimeout(() => profSuggestOpen = false, 150)}
-								class="w-full border bg-transparent px-3 py-2.5 text-xs outline-none"
-								style="border-color: var(--border); color: var(--fg);" />
+								class="input" />
 							{#if profSuggestions().length}
-								<div class="absolute left-0 top-full z-10 mt-0.5 max-h-56 w-full overflow-y-auto border"
-									style="background: var(--surface); border-color: var(--border);">
+								<div class="card absolute left-0 top-full z-10 mt-1 max-h-60 w-full overflow-y-auto p-1" style="box-shadow: var(--shadow-lg);">
 									{#each profSuggestions() as p}
 										<button
 											onmousedown={() => { profName = p.name; profSuggestOpen = false; }}
 											ontouchstart={() => { profName = p.name; profSuggestOpen = false; }}
-											class="flex w-full cursor-pointer items-baseline justify-between gap-2 border-none bg-transparent px-3 py-2.5 text-left transition-colors duration-100"
+											class="flex w-full cursor-pointer items-baseline justify-between gap-2 rounded-md border-none bg-transparent px-3 py-2.5 text-left transition-colors duration-100"
 											style="color: var(--muted);"
-											onmouseenter={(e) => { e.currentTarget.style.background = 'var(--border)'; e.currentTarget.style.color = 'var(--accent)'; }}
+											onmouseenter={(e) => { e.currentTarget.style.background = 'var(--tint)'; e.currentTarget.style.color = 'var(--fg)'; }}
 											onmouseleave={(e) => { e.currentTarget.style.background = 'transparent'; e.currentTarget.style.color = 'var(--muted)'; }}
 										>
-											<span class="min-w-0 truncate text-xs" style="color: var(--fg);">{p.name}</span>
-											<span class="shrink-0 text-[9px] uppercase tracking-[0.05em]">{p.codes.slice(0, 4).join(', ')}{p.codes.length > 4 ? ` +${p.codes.length - 4}` : ''}</span>
+											<span class="min-w-0 truncate text-sm" style="color: var(--fg);">{p.name}</span>
+											<span class="shrink-0 font-mono text-xs uppercase tracking-[0.05em]">{p.codes.slice(0, 4).join(', ')}{p.codes.length > 4 ? ` +${p.codes.length - 4}` : ''}</span>
 										</button>
 									{/each}
 								</div>
 							{/if}
 						</div>
 					</div>
-					<div class="flex gap-3">
-						<div class="flex flex-1 flex-col gap-1">
-							<span class="text-[9px] uppercase tracking-[0.1em]" style="color: var(--muted);">day</span>
-							<select bind:value={constraintDay}
-								class="border bg-transparent px-3 py-2.5 text-xs outline-none"
-								style="border-color: var(--border); color: var(--fg); background: var(--bg);">
+					<div class="flex items-end gap-3">
+						<div class="flex flex-1 flex-col">
+							<label for="c-day" class="field-label">Day</label>
+							<select id="c-day" bind:value={constraintDay} class="select">
 								{#each DAY_LIST as d}<option value={d}>{d}</option>{/each}
 							</select>
 						</div>
-						<label class="flex items-center gap-1.5 self-end pb-2.5">
-							<input type="checkbox" bind:checked={allDay} class="accent-white" />
-							<span class="text-[9px] uppercase tracking-[0.1em]" style="color: var(--muted);">all day</span>
+						<label class="flex cursor-pointer items-center gap-2 rounded-lg border px-3 py-2.5" style="border-color: var(--border);">
+							<input type="checkbox" bind:checked={allDay} style="accent-color: var(--accent); width: 1rem; height: 1rem;" />
+							<span class="text-sm" style="color: var(--fg);">All day</span>
 						</label>
 					</div>
 					{#if !allDay}
 						<div class="flex gap-3">
-							<div class="flex flex-1 flex-col gap-1">
-								<span class="text-[9px] uppercase tracking-[0.1em]" style="color: var(--muted);">from</span>
-								<input type="time" bind:value={cStartTime} class="border bg-transparent px-3 py-2.5 text-xs outline-none" style="border-color: var(--border); color: var(--fg);" />
+							<div class="flex flex-1 flex-col">
+								<label for="c-from" class="field-label">From</label>
+								<input id="c-from" type="time" bind:value={cStartTime} class="input" />
 							</div>
-							<div class="flex flex-1 flex-col gap-1">
-								<span class="text-[9px] uppercase tracking-[0.1em]" style="color: var(--muted);">to</span>
-								<input type="time" bind:value={cEndTime} class="border bg-transparent px-3 py-2.5 text-xs outline-none" style="border-color: var(--border); color: var(--fg);" />
+							<div class="flex flex-1 flex-col">
+								<label for="c-to" class="field-label">To</label>
+								<input id="c-to" type="time" bind:value={cEndTime} class="input" />
 							</div>
 						</div>
 					{/if}
-					<button onclick={addConstraint} disabled={savingConstraint}
-						class="cursor-pointer border px-4 py-2.5 text-[9px] uppercase tracking-[0.15em] transition-all duration-200 disabled:opacity-30"
-						style="background: transparent; border-color: var(--border); color: var(--muted);"
-						onmouseenter={(e) => { e.currentTarget.style.color = 'var(--accent)'; }}
-						onmouseleave={(e) => { e.currentTarget.style.color = 'var(--muted)'; }}
-					>{savingConstraint ? 'adding...' : 'add constraint'}</button>
+					<button onclick={addConstraint} disabled={savingConstraint} class="btn btn-primary">{savingConstraint ? 'adding…' : 'add constraint'}</button>
 				</div>
 
 				<!-- List -->
-				<div class="flex flex-col gap-2">
-					<span class="text-[9px] uppercase tracking-[0.1em]" style="color: var(--muted);">active ({constraints.length})</span>
+				<div class="card card-pad flex flex-col gap-3">
+					<span class="eyebrow">Active ({constraints.length})</span>
 					{#each constraints as c}
-						<div class="flex items-center justify-between border px-3 py-2.5" style="border-color: var(--border);">
-							<div class="min-w-0">
-								<span class="text-xs font-medium" style="color: var(--fg);">{c.professorName}</span>
-								<span class="ml-2 text-[9px]" style="color: var(--muted);">{c.day}{c.allDay ? '' : ` ${c.startTime}-${c.endTime}`}</span>
+						<div class="flex items-center justify-between gap-3 rounded-lg border px-3 py-2.5" style="border-color: var(--border);">
+							<div class="flex min-w-0 flex-wrap items-baseline gap-x-2 gap-y-0.5">
+								<span class="text-sm font-semibold" style="color: var(--fg);">{c.professorName}</span>
+								<span class="font-mono text-xs" style="color: var(--muted);">{c.day}{c.allDay ? ' · all day' : ` · ${c.startTime}–${c.endTime}`}</span>
 							</div>
 							<button onclick={() => removeConstraint(c.id)}
-								class="flex-shrink-0 cursor-pointer border-none bg-transparent text-[9px] uppercase tracking-[0.1em]"
+								class="shrink-0 cursor-pointer border-none bg-transparent text-xs font-medium transition-colors"
 								style="color: var(--muted);"
-								onmouseenter={(e) => { e.currentTarget.style.color = '#e44'; }}
+								onmouseenter={(e) => { e.currentTarget.style.color = '#d8593f'; }}
 								onmouseleave={(e) => { e.currentTarget.style.color = 'var(--muted)'; }}
 							>remove</button>
 						</div>
 					{:else}
-						<p class="text-xs" style="color: var(--muted);">none set</p>
+						<p class="hint">No constraints set.</p>
 					{/each}
+				</div>
 				</div>
 			</div>
 		{/if}
@@ -1911,45 +1869,39 @@
 
 	<!-- Toast -->
 	{#if toast}
-		<div class="fixed bottom-5 left-1/2 z-50 -translate-x-1/2 border px-4 py-2.5 text-[10px]"
-			style="background: var(--surface); border-color: var(--border); color: var(--fg);">{toast}</div>
+		<div class="animate-in fixed bottom-6 left-1/2 z-50 flex -translate-x-1/2 items-center gap-2.5 rounded-full px-4 py-2.5 text-sm"
+			style="background: var(--surface); border: 1px solid var(--border); color: var(--fg); box-shadow: var(--shadow-lg);">
+			<span class="inline-block h-1.5 w-1.5 rounded-full" style="background: var(--accent);"></span>{toast}
+		</div>
 	{/if}
 
 	<!-- UWE conflict warning modal -->
 	{#if moveWarnModal}
-		<div class="fixed inset-0 z-50 flex items-center justify-center px-4" style="background: rgba(0,0,0,0.6);" onclick={cancelDrop}>
-			<div class="flex w-full max-w-sm flex-col gap-5 border p-6" style="background: var(--surface); border-color: var(--border);" onclick={(e) => e.stopPropagation()}>
+		<div class="fixed inset-0 z-50 flex items-center justify-center px-4" style="background: rgba(0,0,0,0.55); backdrop-filter: blur(2px);" onclick={cancelDrop}>
+			<div class="card animate-in flex w-full max-w-sm flex-col gap-5 p-6" style="box-shadow: var(--shadow-lg);" onclick={(e) => e.stopPropagation()}>
 				<div class="flex flex-col gap-2">
-					<p class="text-[9px] uppercase tracking-[0.15em]" style="color: var(--accent);">heads up</p>
-					<p class="text-sm leading-relaxed" style="color: var(--fg);">
-						<span class="font-medium">{moveWarnModal.count} {moveWarnModal.count === 1 ? 'student has' : 'students have'}</span> listed
-						<span class="font-medium">{moveWarnModal.courseCode}</span> as a UWE preference.
+					<span class="eyebrow" style="color: var(--accent);">heads up</span>
+					<p class="text-base leading-relaxed" style="color: var(--fg);">
+						<span class="font-semibold">{moveWarnModal.count} {moveWarnModal.count === 1 ? 'student has' : 'students have'}</span> listed
+						<span class="font-semibold">{moveWarnModal.courseCode}</span> as a UWE preference.
 						Shifting this class may create conflicts for them.
 					</p>
-					<p class="text-xs" style="color: var(--muted);">Do you still want to proceed with the move?</p>
+					<p class="hint">Do you still want to proceed with the move?</p>
 				</div>
-				<div class="flex gap-3 justify-end">
-					<button onclick={cancelDrop}
-						class="cursor-pointer border px-4 py-2 text-[9px] uppercase tracking-[0.12em] transition-colors duration-150"
-						style="border-color: var(--border); color: var(--muted); background: transparent;"
-						onmouseenter={(e) => { e.currentTarget.style.color = 'var(--fg)'; }}
-						onmouseleave={(e) => { e.currentTarget.style.color = 'var(--muted)'; }}
-					>cancel</button>
-					<button onclick={confirmDrop}
-						class="cursor-pointer border px-4 py-2 text-[9px] uppercase tracking-[0.12em] transition-colors duration-150"
-						style="border-color: var(--muted); color: var(--fg); background: transparent;"
-						onmouseenter={(e) => { e.currentTarget.style.borderColor = 'var(--accent)'; e.currentTarget.style.color = 'var(--accent)'; }}
-						onmouseleave={(e) => { e.currentTarget.style.borderColor = 'var(--muted)'; e.currentTarget.style.color = 'var(--fg)'; }}
-					>yes, move it</button>
+				<div class="flex justify-end gap-3">
+					<button onclick={cancelDrop} class="btn btn-ghost btn-sm">cancel</button>
+					<button onclick={confirmDrop} class="btn btn-primary btn-sm">yes, move it</button>
 				</div>
 			</div>
 		</div>
 	{/if}
 </div>
 
-<footer class="py-4 text-center text-[9px] uppercase tracking-[0.12em]" style="color: var(--muted); background: var(--bg);">
-	built and maintained by <a href="https://github.com/rohitjg13" target="_blank" rel="noopener noreferrer" style="color: var(--muted); text-decoration: underline; text-underline-offset: 3px; transition: color 0.15s;"
-		onmouseenter={(e) => { (e.currentTarget as HTMLAnchorElement).style.color = 'var(--accent)'; }}
-		onmouseleave={(e) => { (e.currentTarget as HTMLAnchorElement).style.color = 'var(--muted)'; }}
-	>rohit j g</a>
+<footer class="border-t py-5 text-center" style="border-color: var(--border); background: var(--bg);">
+	<span class="eyebrow" style="font-size: 0.6rem;">built &amp; maintained by
+		<a href="https://github.com/rohitjg13" target="_blank" rel="noopener noreferrer" class="underline decoration-1 underline-offset-4 transition-colors" style="color: var(--muted);"
+			onmouseenter={(e) => { (e.currentTarget as HTMLAnchorElement).style.color = 'var(--accent)'; }}
+			onmouseleave={(e) => { (e.currentTarget as HTMLAnchorElement).style.color = 'var(--muted)'; }}
+		>rohit j g</a>
+	</span>
 </footer>
