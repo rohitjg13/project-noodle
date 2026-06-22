@@ -1228,9 +1228,9 @@
 				</div>
 
 				<!-- Batch selector -->
-				<div class="card card-pad flex flex-col gap-3 lg:max-w-2xl">
+				<div class="card flex flex-col gap-2.5 p-4 max-w-md">
 					<span class="eyebrow">Batches</span>
-					<div class="grid gap-2" style="grid-template-columns: repeat(auto-fill, minmax(132px, 1fr));">
+					<div class="grid gap-2" style="grid-template-columns: repeat(auto-fit, minmax(116px, 1fr));">
 						{#each batchInputs as input, i}
 							<div class="relative flex items-center gap-2">
 								<input
@@ -1277,14 +1277,6 @@
 						<div class="flex-1"></div>
 						<button onclick={loadBatches} class="btn btn-primary btn-sm">load timetable</button>
 					</div>
-
-					{#if selectedBatches.length}
-						<div class="flex flex-wrap gap-2 border-t pt-3" style="border-color: var(--border);">
-							{#each selectedBatches as b}
-								<span class="badge" style="color: var(--fg);">{b}</span>
-							{/each}
-						</div>
-					{/if}
 				</div>
 
 				<!-- Timetable grid -->
