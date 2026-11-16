@@ -1,4 +1,4 @@
-// Course types (ported from Scooby)
+// Course types (parsed from the timetable XLSX)
 export interface Course {
 	sno: number;
 	courseCode: string;
@@ -15,6 +15,46 @@ export interface Course {
 	component?: string;
 	openAsUWE?: boolean;
 	remarks?: string;
+	// Precomputed when the sheet is parsed at build time (see timetable-parse.ts), so
+	// neither the server nor the grid re-derives them per row per render.
+	/** Base course code, upper-cased: "ECE204-LEC1" → "ECE204" */
+	base: string;
+	/** Batch tokens from Programme + Student Block, upper-cased */
+	batches: string[];
+	startMin: number;
+	endMin: number;
+	/** Override key `courseCode|component|originalDay`, unique per weekly slot */
+	key: string;
+}
+
+export const baseCode = (code: string): string => code.split('-')[0].toUpperCase();
+
+/** A weekly slot's saved position. Shared by the schedule API and the grid. */
+export interface SlotPosition {
+	day: string;
+	startTime: string;
+	endTime: string;
+}
+
+// Student blocks arrive as "ECE21 to ECE215" / "CSD37 to CSD311" — letters + year digit
+// are the base, the rest is the block index. Returns the expanded tokens.
+export function expandBlocks(raw: string): string[] {
+	if (!raw) return [];
+	const expanded = raw.replace(
+		/([A-Za-z]+\d)(\d+)\s*to\s*\1(\d+)/gi,
+		(_m, base: string, from: string, to: string) => {
+			const out: string[] = [];
+			const lo = parseInt(from);
+			// A typo like "ECE21 to ECE2150" must not balloon into thousands of batches
+			const hi = Math.min(parseInt(to), lo + 99);
+			for (let i = lo; i <= hi; i++) out.push(base + i);
+			return out.join(' ');
+		}
+	);
+	return expanded
+		.split(/[\s,]+/)
+		.map((s) => s.trim())
+		.filter((s) => s && s !== '-');
 }
 
 export const DAYS = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
@@ -36,8 +76,19 @@ export const DAY_ABBREV: Record<string, string[]> = {
 	WTh: ['Wednesday', 'Thursday']
 };
 
+// Both parsers below run inside every conflict check, on a few dozen distinct strings —
+// memoised, the grid's hot loops stop re-running regexes.
+const dayCache = new Map<string, string[]>();
+const minuteCache = new Map<string, number>();
+
 export function parseDays(dayStr: string): string[] {
 	if (!dayStr) return [];
+	let days = dayCache.get(dayStr);
+	if (!days) dayCache.set(dayStr, (days = parseDaysUncached(dayStr)));
+	return days;
+}
+
+function parseDaysUncached(dayStr: string): string[] {
 	if (dayStr === 'SAT') return ['Saturday'];
 	const cleaned = dayStr.trim().replace(/\s+/g, '');
 
@@ -77,6 +128,12 @@ export function parseDays(dayStr: string): string[] {
 
 export function timeToMinutes(time: string): number {
 	if (!time) return 0;
+	let mins = minuteCache.get(time);
+	if (mins === undefined) minuteCache.set(time, (mins = timeToMinutesUncached(time)));
+	return mins;
+}
+
+function timeToMinutesUncached(time: string): number {
 	const cleaned = time.trim().toUpperCase();
 	let hours = 0;
 	let minutes = 0;
@@ -164,7 +221,7 @@ export function countConflicts(
 	return counts;
 }
 
-// Priority score calculation
+// Priority score for student UWE demand: a first choice outweighs a third
 export function calculatePriorityScore(p1: number, p2: number, p3: number): number {
 	return p1 * 3 + p2 * 2 + p3 * 1;
 }

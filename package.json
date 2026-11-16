@@ -14,7 +14,9 @@
 		"db:generate": "drizzle-kit generate",
 		"db:migrate": "drizzle-kit migrate",
 		"db:studio": "drizzle-kit studio",
-		"auth:schema": "better-auth generate --config src/lib/server/auth.ts --output src/lib/server/db/auth.schema.ts --yes"
+		"auth:schema": "better-auth generate --config src/lib/server/auth.ts --output src/lib/server/db/auth.schema.ts --yes",
+		"test": "node src/lib/types.check.ts",
+		"db:upgrade": "node --env-file-if-exists=.env scripts/db-upgrade.mjs"
 	},
 	"devDependencies": {
 		"@better-auth/cli": "~1.4.21",
@@ -31,9 +33,7 @@
 		"svelte-check": "^4.4.2",
 		"tailwindcss": "^4.1.18",
 		"typescript": "^5.9.3",
-		"vite": "^7.3.1"
-	},
-	"dependencies": {
+		"vite": "^7.3.1",
 		"xlsx": "^0.18.5"
 	}
 }

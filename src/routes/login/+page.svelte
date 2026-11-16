@@ -5,7 +5,9 @@
 
 	async function signInWithGoogle() {
 		loading = true;
-		await authClient.signIn.social({ provider: 'google', callbackURL: '/' });
+		// On success the browser is already navigating to Google; only a failure returns here
+		const res = await authClient.signIn.social({ provider: 'google', callbackURL: '/' }).catch(() => null);
+		if (!res || res.error) loading = false;
 	}
 </script>
 

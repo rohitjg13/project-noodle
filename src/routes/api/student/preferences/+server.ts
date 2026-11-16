@@ -1,65 +1,59 @@
-import { json } from '@sveltejs/kit';
+import { error, json } from '@sveltejs/kit';
 import type { RequestHandler } from './$types';
 import { db } from '$lib/server/db';
 import { studentPreference } from '$lib/server/db/schema';
 import { eq } from 'drizzle-orm';
+import { readJson, requireUser, str } from '$lib/server/api';
+import { uweCodes } from '$lib/server/timetable';
+
+const BATCH = /^[A-Z0-9-]{1,24}$/;
 
 export const GET: RequestHandler = async ({ locals }) => {
-	if (!locals.user) return json({ error: 'Unauthorized' }, { status: 401 });
-
-	const prefs = await db
+	const user = requireUser(locals);
+	const [preference] = await db
 		.select()
 		.from(studentPreference)
-		.where(eq(studentPreference.userId, locals.user.id))
+		.where(eq(studentPreference.userId, user.id))
 		.limit(1);
-
-	return json({ preference: prefs[0] ?? null });
+	return json({ preference: preference ?? null });
 };
 
+// POST /api/student/preferences — save the caller's batch, minor and ranked UWEs.
+// Body: { batch: "ECE21,ECE2YR", minor, uwePref1, uwePref2, uwePref3 }
 export const POST: RequestHandler = async ({ locals, request }) => {
-	if (!locals.user) return json({ error: 'Unauthorized' }, { status: 401 });
+	const user = requireUser(locals);
+	const body = await readJson(request);
 
-	const body = await request.json();
-	const { batch, minor, uwePref1, uwePref2, uwePref3 } = body;
-
-	// Validate no duplicate UWE preferences
-	const uweChoices = [uwePref1, uwePref2, uwePref3].filter(Boolean);
-	if (new Set(uweChoices).size !== uweChoices.length) {
-		return json({ error: 'Duplicate UWE preferences not allowed' }, { status: 400 });
+	const batches = [...new Set(str(body.batch, 120).toUpperCase().split(',').map((b) => b.trim()).filter(Boolean))];
+	if (batches.length < 1 || batches.length > 4 || !batches.every((b) => BATCH.test(b))) {
+		error(400, 'Enter between one and four batch codes');
 	}
 
-	// Check if already submitted and locked
-	const existing = await db
-		.select()
-		.from(studentPreference)
-		.where(eq(studentPreference.userId, locals.user.id))
-		.limit(1);
+	// Only courses the sheet marks as open-as-UWE can be ranked, each at most once
+	const uwes = [body.uwePref1, body.uwePref2, body.uwePref3].map((v) => str(v, 64).toUpperCase() || null);
+	const chosen = uwes.filter((c): c is string => c !== null);
+	if (chosen.some((c) => !uweCodes.has(c))) error(400, 'Unknown UWE course');
+	if (new Set(chosen).size !== chosen.length) error(400, 'Duplicate UWE preferences not allowed');
 
-	if (existing[0]?.locked) {
-		return json({ error: 'Preferences are locked' }, { status: 403 });
-	}
-
-	// Normalize empty strings to null (minor-only submissions send empty UWE prefs)
 	const prefs = {
-		batch,
-		minor: minor || null,
-		uwePref1: uwePref1 || null,
-		uwePref2: uwePref2 || null,
-		uwePref3: uwePref3 || null
+		batch: batches.join(','),
+		minor: str(body.minor, 200) || null,
+		uwePref1: uwes[0],
+		uwePref2: uwes[1],
+		uwePref3: uwes[2]
 	};
 
-	if (existing[0]) {
-		await db
-			.update(studentPreference)
-			.set(prefs)
-			.where(eq(studentPreference.userId, locals.user.id));
-	} else {
-		await db.insert(studentPreference).values({
-			userId: locals.user.id,
-			...prefs,
-			locked: false
-		});
-	}
+	// One upsert; a locked row matches the conflict but fails setWhere, so nothing comes back
+	const saved = await db
+		.insert(studentPreference)
+		.values({ userId: user.id, ...prefs })
+		.onConflictDoUpdate({
+			target: studentPreference.userId,
+			set: { ...prefs, updatedAt: new Date() },
+			setWhere: eq(studentPreference.locked, false)
+		})
+		.returning({ id: studentPreference.id });
+	if (saved.length === 0) error(403, 'Preferences are locked');
 
 	return json({ success: true });
 };

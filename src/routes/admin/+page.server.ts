@@ -1,87 +1,70 @@
 import { redirect, fail } from '@sveltejs/kit';
-import { eq, inArray, like, notInArray } from 'drizzle-orm';
+import { and, eq, inArray, like, ne, notExists, notInArray } from 'drizzle-orm';
 import { db } from '$lib/server/db';
-import { user, batch, crAssignment } from '$lib/server/db/schema';
+import { user, batch, crAssignment, pendingCr } from '$lib/server/db/schema';
+import { batchNames } from '$lib/server/timetable';
 import type { PageServerLoad, Actions } from './$types';
-import * as XLSX from 'xlsx';
 
-const dataFiles = import.meta.glob('$lib/data/*.{xlsx,xls,csv}', {
-	query: '?url',
-	import: 'default',
-	eager: true
-});
+type Tx = Parameters<Parameters<typeof db.transaction>[0]>[0];
 
-async function syncBatchesFromXLSX(fetchFn: typeof fetch): Promise<void> {
-	const filePaths = Object.keys(dataFiles);
-	const targetFile =
-		filePaths.find((f) => f.endsWith('.xlsx') || f.endsWith('.xls')) ||
-		filePaths.find((f) => f.endsWith('.csv'));
-	if (!targetFile) return;
+// The batch table mirrors the batches named in the timetable sheet. The sheet is baked
+// in at build time, so it can only differ from the table once per deploy — sync on the
+// first admin page load of each server instance and never again.
+let batchSync: Promise<void> | null = null;
 
-	const url = dataFiles[targetFile] as string;
-	const response = await fetchFn(url);
-	if (!response.ok) return;
+function syncBatches(): Promise<void> {
+	return (batchSync ??= runBatchSync().catch((err) => {
+		batchSync = null; // let the next load retry
+		throw err;
+	}));
+}
 
-	const buffer = await response.arrayBuffer();
-	const workbook = targetFile.endsWith('.csv')
-		? XLSX.read(new TextDecoder('utf-8').decode(buffer), { type: 'string' })
-		: XLSX.read(buffer, { type: 'array' });
+async function runBatchSync(): Promise<void> {
+	if (batchNames.length === 0) return;
 
-	const worksheet = workbook.Sheets[workbook.SheetNames[0]];
-	const jsonData = XLSX.utils.sheet_to_json<Record<string, unknown>>(worksheet);
-
-	const batchSet = new Set<string>();
-	for (const row of jsonData) {
-		const keys = ['Batch', 'Major', 'Batches', 'Program'];
-		for (const key of keys) {
-			const val = row[key];
-			if (val && String(val).trim() && String(val).trim() !== '-') {
-				// Split by whitespace and/or commas — handles "ELC21 ELC22 ELC23 ELC24" and "CSE-A, CSE-B"
-				String(val)
-					.split(/[\s,]+/)
-					.map((s) => s.trim())
-					.filter((s) => s && s !== '-')
-					.forEach((b) => batchSet.add(b));
-				break;
-			}
-		}
-	}
-
-	if (batchSet.size === 0) return;
-
-	// Remove stale "combined" batch rows (names containing a space) that have no CR assignments
-	const combined = await db.select({ id: batch.id }).from(batch).where(like(batch.name, '% %'));
-	if (combined.length > 0) {
-		const combinedIds = combined.map((b) => b.id);
-		const assignedCombined = await db
-			.select({ batchId: crAssignment.batchId })
-			.from(crAssignment)
-			.where(inArray(crAssignment.batchId, combinedIds));
-		const assignedIds = new Set(assignedCombined.map((r) => r.batchId));
-		const safeToDelete = combinedIds.filter((id) => !assignedIds.has(id));
-		if (safeToDelete.length > 0) {
-			await db.delete(batch).where(inArray(batch.id, safeToDelete));
-		}
-	}
+	// Remove stale "combined" batch rows (names containing a space) that nobody is CR of
+	await db
+		.delete(batch)
+		.where(
+			and(
+				like(batch.name, '% %'),
+				notExists(db.select({ id: crAssignment.id }).from(crAssignment).where(eq(crAssignment.batchId, batch.id)))
+			)
+		);
 
 	const existing = await db.select({ name: batch.name }).from(batch);
-	const existingNames = new Set(existing.map((b) => b.name.toLowerCase()));
-	const toInsert = [...batchSet].filter((name) => !existingNames.has(name.toLowerCase()));
-
-	if (toInsert.length > 0) {
-		await db.insert(batch).values(toInsert.map((name) => ({ id: crypto.randomUUID(), name })));
+	const have = new Set(existing.map((b) => b.name.toLowerCase()));
+	const missing = batchNames.filter((name) => !have.has(name.toLowerCase()));
+	if (missing.length > 0) {
+		await db.insert(batch).values(missing.map((name) => ({ id: crypto.randomUUID(), name })));
 	}
 }
 
-export const load: PageServerLoad = async ({ locals, fetch }) => {
+const isAdmin = (locals: App.Locals) => locals.user?.role === 'super_admin';
+
+const EMAIL = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+
+/** Form values for `name`, keeping only sane strings (a file upload is not a batch id) */
+function ids(data: FormData, name: string): string[] {
+	return [...new Set(data.getAll(name))].filter(
+		(v): v is string => typeof v === 'string' && v.length > 0 && v.length <= 64
+	);
+}
+
+// Holding a batch makes an account a CR and holding none makes it a student again — but
+// never touch an admin's role: assigning an admin a batch must not demote them.
+async function setRole(tx: Tx, userId: string, role: 'cr' | 'student') {
+	await tx.update(user).set({ role }).where(and(eq(user.id, userId), ne(user.role, 'super_admin')));
+}
+
+export const load: PageServerLoad = async ({ locals }) => {
 	if (!locals.user) throw redirect(302, '/login');
 	if (locals.user.role !== 'super_admin') throw redirect(302, '/');
 
-	// Auto-sync batches from XLSX on every load
-	await syncBatchesFromXLSX(fetch);
+	await syncBatches();
 
-	const [batches, crs] = await Promise.all([
-		db.select().from(batch).orderBy(batch.name),
+	const [batches, crs, invites] = await Promise.all([
+		db.select({ id: batch.id, name: batch.name }).from(batch).orderBy(batch.name),
 		db
 			.select({
 				assignmentId: crAssignment.id,
@@ -91,8 +74,20 @@ export const load: PageServerLoad = async ({ locals, fetch }) => {
 			.from(crAssignment)
 			.innerJoin(user, eq(crAssignment.userId, user.id))
 			.innerJoin(batch, eq(crAssignment.batchId, batch.id))
-			.orderBy(user.name)
+			.orderBy(user.name),
+		db
+			.select({ email: pendingCr.email, batchName: batch.name, batchId: pendingCr.batchId })
+			.from(pendingCr)
+			.innerJoin(batch, eq(pendingCr.batchId, batch.id))
+			.orderBy(pendingCr.email)
 	]);
+
+	// Group invitations by email, same shape as the CR list
+	const inviteMap = new Map<string, { email: string; batches: { id: string; name: string }[] }>();
+	for (const row of invites) {
+		if (!inviteMap.has(row.email)) inviteMap.set(row.email, { email: row.email, batches: [] });
+		inviteMap.get(row.email)!.batches.push({ id: row.batchId, name: row.batchName });
+	}
 
 	// Group CRs by user
 	const crMap = new Map<string, { user: { id: string; name: string; email: string }; batches: { id: string; name: string; assignmentId: string }[] }>();
@@ -101,59 +96,131 @@ export const load: PageServerLoad = async ({ locals, fetch }) => {
 		crMap.get(row.user.id)!.batches.push({ ...row.batch, assignmentId: row.assignmentId });
 	}
 
-	return { batches, crs: [...crMap.values()] };
+	return { batches, crs: [...crMap.values()], invites: [...inviteMap.values()] };
 };
 
 export const actions: Actions = {
 	assignCr: async ({ request, locals }) => {
-		if (!locals.user || locals.user.role !== 'super_admin') return fail(403, { error: 'Forbidden' });
+		if (!isAdmin(locals)) return fail(403, { error: 'Forbidden' });
 
 		const data = await request.formData();
-		const email = (data.get('email') as string)?.trim().toLowerCase();
-		const batchIds = data.getAll('batchIds') as string[];
+		const raw = data.get('email');
+		const email = typeof raw === 'string' ? raw.trim().toLowerCase() : '';
+		const batchIds = ids(data, 'batchIds');
 
-		if (!email || batchIds.length === 0) {
-			return fail(400, { error: 'Email and at least one batch are required', action: 'assignCr' });
+		if (!EMAIL.test(email) || email.length > 254 || batchIds.length === 0) {
+			return fail(400, { error: 'A valid email and at least one batch are required', action: 'assignCr' });
 		}
 
-		const [targetUser] = await db.select().from(user).where(eq(user.email, email)).limit(1);
-		if (!targetUser) {
-			return fail(404, {
-				error: `No account found for ${email}. The user must log in at least once.`,
-				action: 'assignCr'
-			});
-		}
-
-		const validBatches = await db.select().from(batch).where(inArray(batch.id, batchIds));
+		const [validBatches, [targetUser]] = await Promise.all([
+			db.select({ id: batch.id, name: batch.name }).from(batch).where(inArray(batch.id, batchIds)),
+			db.select({ id: user.id, name: user.name }).from(user).where(eq(user.email, email)).limit(1)
+		]);
 		if (validBatches.length === 0) return fail(404, { error: 'No valid batches found', action: 'assignCr' });
+		const batchList = validBatches.map((b) => b.name).join(', ');
 
-		const existing = await db.select({ batchId: crAssignment.batchId }).from(crAssignment).where(eq(crAssignment.userId, targetUser.id));
-		const existingBatchIds = new Set(existing.map((r) => r.batchId));
-		const toInsert = validBatches.filter((b) => !existingBatchIds.has(b.id));
-
-		if (toInsert.length > 0) {
-			await db.insert(crAssignment).values(toInsert.map((b) => ({ id: crypto.randomUUID(), userId: targetUser.id, batchId: b.id })));
+		// No account yet — park the grant until their first sign-in claims it
+		if (!targetUser) {
+			await db
+				.insert(pendingCr)
+				.values(validBatches.map((b) => ({ email, batchId: b.id, invitedBy: locals.user!.id })))
+				.onConflictDoNothing();
+			return { success: true, action: 'invite', name: email, batch: batchList };
 		}
-		await db.update(user).set({ role: 'cr' }).where(eq(user.id, targetUser.id));
 
-		return { success: true, action: 'assignCr', name: targetUser.name, batch: validBatches.map((b) => b.name).join(', ') };
+		await db.transaction(async (tx) => {
+			await tx
+				.insert(crAssignment)
+				.values(validBatches.map((b) => ({ id: crypto.randomUUID(), userId: targetUser.id, batchId: b.id })))
+				.onConflictDoNothing();
+			await setRole(tx, targetUser.id, 'cr');
+		});
+
+		return { success: true, action: 'assignCr', name: targetUser.name, batch: batchList };
+	},
+
+	removeInvite: async ({ request, locals }) => {
+		if (!isAdmin(locals)) return fail(403, { error: 'Forbidden' });
+
+		const raw = (await request.formData()).get('email');
+		const email = typeof raw === 'string' ? raw.trim().toLowerCase() : '';
+		if (!email) return fail(400, { error: 'Invalid request', action: 'removeInvite' });
+
+		await db.delete(pendingCr).where(eq(pendingCr.email, email));
+		return { success: true, action: 'removeInvite' };
+	},
+
+	setCrBatches: async ({ request, locals }) => {
+		if (!isAdmin(locals)) return fail(403, { error: 'Forbidden' });
+
+		const data = await request.formData();
+		const userId = data.get('userId');
+		const batchIds = ids(data, 'batchIds');
+		if (typeof userId !== 'string' || !userId) {
+			return fail(400, { error: 'Invalid request', action: 'setCrBatches' });
+		}
+
+		const [[targetUser], valid] = await Promise.all([
+			db.select({ id: user.id, name: user.name }).from(user).where(eq(user.id, userId)).limit(1),
+			batchIds.length
+				? db.select({ id: batch.id, name: batch.name }).from(batch).where(inArray(batch.id, batchIds))
+				: []
+		]);
+		if (!targetUser) return fail(404, { error: 'That account no longer exists', action: 'setCrBatches' });
+		// Ids were sent but none exist: a stale form, not a request to strip all access
+		if (batchIds.length > 0 && valid.length === 0) {
+			return fail(404, { error: 'No valid batches found', action: 'setCrBatches' });
+		}
+		const wanted = valid.map((b) => b.id);
+
+		// Replace the set atomically: drop what's no longer wanted, add what's missing
+		await db.transaction(async (tx) => {
+			const mine = eq(crAssignment.userId, userId);
+			await tx
+				.delete(crAssignment)
+				.where(wanted.length ? and(mine, notInArray(crAssignment.batchId, wanted)) : mine);
+			if (wanted.length) {
+				await tx
+					.insert(crAssignment)
+					.values(wanted.map((batchId) => ({ id: crypto.randomUUID(), userId, batchId })))
+					.onConflictDoNothing();
+			}
+			// No batches left means no CR duties left
+			await setRole(tx, userId, wanted.length === 0 ? 'student' : 'cr');
+		});
+
+		return {
+			success: true,
+			action: 'setCrBatches',
+			name: targetUser.name,
+			batch: valid.map((b) => b.name).join(', ')
+		};
 	},
 
 	removeCr: async ({ request, locals }) => {
-		if (!locals.user || locals.user.role !== 'super_admin') return fail(403, { error: 'Forbidden' });
+		if (!isAdmin(locals)) return fail(403, { error: 'Forbidden' });
 
-		const data = await request.formData();
-		const assignmentId = data.get('assignmentId') as string;
-		const userId = data.get('userId') as string;
-
-		if (!assignmentId || !userId) return fail(400, { error: 'Invalid request', action: 'removeCr' });
-
-		await db.delete(crAssignment).where(eq(crAssignment.id, assignmentId));
-
-		const remaining = await db.select().from(crAssignment).where(eq(crAssignment.userId, userId)).limit(1);
-		if (remaining.length === 0) {
-			await db.update(user).set({ role: 'student' }).where(eq(user.id, userId));
+		const assignmentId = (await request.formData()).get('assignmentId');
+		if (typeof assignmentId !== 'string' || !assignmentId) {
+			return fail(400, { error: 'Invalid request', action: 'removeCr' });
 		}
+
+		// Whose role to revisit comes from the row that was actually deleted, never from
+		// a second form field that could name somebody else
+		await db.transaction(async (tx) => {
+			const [removed] = await tx
+				.delete(crAssignment)
+				.where(eq(crAssignment.id, assignmentId))
+				.returning({ userId: crAssignment.userId });
+			if (!removed) return;
+
+			const [remaining] = await tx
+				.select({ id: crAssignment.id })
+				.from(crAssignment)
+				.where(eq(crAssignment.userId, removed.userId))
+				.limit(1);
+			if (!remaining) await setRole(tx, removed.userId, 'student');
+		});
 
 		return { success: true, action: 'removeCr' };
 	}

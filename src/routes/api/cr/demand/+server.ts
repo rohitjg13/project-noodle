@@ -1,70 +1,54 @@
 import { json } from '@sveltejs/kit';
 import type { RequestHandler } from './$types';
 import { db } from '$lib/server/db';
-import { studentPreference, crAssignment, batch } from '$lib/server/db/schema';
-import { eq, or, ilike } from 'drizzle-orm';
+import { studentPreference } from '$lib/server/db/schema';
+import { managedBatches, prefInBatches, requireManager } from '$lib/server/api';
 import { calculatePriorityScore } from '$lib/types';
 
+const columns = {
+	minor: studentPreference.minor,
+	uwePref1: studentPreference.uwePref1,
+	uwePref2: studentPreference.uwePref2,
+	uwePref3: studentPreference.uwePref3
+};
+
+// GET /api/cr/demand — UWE and minor demand. Admins see all students; CRs see only the
+// students of their assigned batches.
 export const GET: RequestHandler = async ({ locals }) => {
-	if (!locals.user) return json({ error: 'Unauthorized' }, { status: 401 });
-	if (locals.user.role !== 'cr' && locals.user.role !== 'super_admin') {
-		return json({ error: 'Forbidden' }, { status: 403 });
-	}
+	const user = requireManager(locals);
 
-	// super_admin sees all students; CRs see only their assigned batches
-	let allPrefs;
-	if (locals.user.role === 'super_admin') {
-		allPrefs = await db.select().from(studentPreference);
+	let allPrefs: { minor: string | null; uwePref1: string | null; uwePref2: string | null; uwePref3: string | null }[];
+	if (user.role === 'super_admin') {
+		allPrefs = await db.select(columns).from(studentPreference);
 	} else {
-		const assignments = await db
-			.select({ batchName: batch.name })
-			.from(crAssignment)
-			.innerJoin(batch, eq(crAssignment.batchId, batch.id))
-			.where(eq(crAssignment.userId, locals.user.id));
-
-		const batchNames = assignments.map((a) => a.batchName);
-		allPrefs = batchNames.length === 0
-			? []
-			: await db
-				.select()
-				.from(studentPreference)
-				.where(or(...batchNames.map((name) => ilike(studentPreference.batch, `%${name}%`))));
+		const batches = await managedBatches(user.id);
+		allPrefs = batches.size
+			? await db.select(columns).from(studentPreference).where(prefInBatches(batches))
+			: [];
 	}
 
-	const demandMap = new Map<
-		string,
-		{ courseCode: string; p1: number; p2: number; p3: number; total: number }
-	>();
-
-	for (const pref of allPrefs) {
-		for (const [code, rank] of [
-			[pref.uwePref1, 1],
-			[pref.uwePref2, 2],
-			[pref.uwePref3, 3]
-		] as [string | null, number][]) {
-			if (!code) continue;
-			const existing = demandMap.get(code) || { courseCode: code, p1: 0, p2: 0, p3: 0, total: 0 };
-			if (rank === 1) existing.p1++;
-			else if (rank === 2) existing.p2++;
-			else existing.p3++;
-			existing.total++;
-			demandMap.set(code, existing);
-		}
-	}
-
-	const demand = Array.from(demandMap.values())
-		.map((d) => ({
-			...d,
-			priorityScore: calculatePriorityScore(d.p1, d.p2, d.p3)
-		}))
-		.sort((a, b) => b.priorityScore - a.priorityScore);
-
-	// Minor demand: count of students per selected minor (same batch scoping as UWE demand)
+	const demandMap = new Map<string, { courseCode: string; p1: number; p2: number; p3: number; total: number }>();
 	const minorMap = new Map<string, number>();
+
 	for (const pref of allPrefs) {
 		if (pref.minor) minorMap.set(pref.minor, (minorMap.get(pref.minor) ?? 0) + 1);
+		[pref.uwePref1, pref.uwePref2, pref.uwePref3].forEach((raw, i) => {
+			if (!raw) return;
+			const code = raw.toUpperCase();
+			const entry = demandMap.get(code) ?? { courseCode: code, p1: 0, p2: 0, p3: 0, total: 0 };
+			if (i === 0) entry.p1++;
+			else if (i === 1) entry.p2++;
+			else entry.p3++;
+			entry.total++;
+			demandMap.set(code, entry);
+		});
 	}
-	const minorDemand = Array.from(minorMap.entries())
+
+	const demand = [...demandMap.values()]
+		.map((d) => ({ ...d, priorityScore: calculatePriorityScore(d.p1, d.p2, d.p3) }))
+		.sort((a, b) => b.priorityScore - a.priorityScore);
+
+	const minorDemand = [...minorMap.entries()]
 		.map(([minor, count]) => ({ minor, count }))
 		.sort((a, b) => b.count - a.count);
 
