@@ -1,5 +1,5 @@
 import { relations } from "drizzle-orm";
-import { pgTable, text, timestamp, index, boolean } from "drizzle-orm/pg-core";
+import { pgTable, text, timestamp, index, uniqueIndex, boolean } from "drizzle-orm/pg-core";
 import { user } from "./auth.schema";
 
 export const batch = pgTable("batch", {
@@ -26,8 +26,9 @@ export const crAssignment = pgTable(
     assignedAt: timestamp("assigned_at").defaultNow().notNull(),
   },
   (table) => [
-    index("cr_assignment_userId_idx").on(table.userId),
     index("cr_assignment_batchId_idx").on(table.batchId),
+    // One row per (CR, batch) — lets grants be written as a single conflict-free insert
+    uniqueIndex("cr_assignment_user_batch_uniq").on(table.userId, table.batchId),
   ]
 );
 

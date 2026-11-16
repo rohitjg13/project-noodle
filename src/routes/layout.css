@@ -28,6 +28,9 @@
 	--shadow: 0 1px 2px rgba(0, 0, 0, 0.4), 0 8px 24px -12px rgba(0, 0, 0, 0.6);
 	--shadow-lg: 0 24px 60px -20px rgba(0, 0, 0, 0.75);
 	--ring: color-mix(in srgb, var(--accent) 30%, transparent);
+	/* semantic states outside the schedule's own green/amber/red signals */
+	--danger: #d8593f;
+	--ok: #3fa463;
 
 	color-scheme: dark;
 }
@@ -447,6 +450,29 @@ body {
 }
 .animate-in {
 	animation: nood-fade-up 0.42s cubic-bezier(0.22, 0.7, 0.27, 1) both;
+}
+
+/* Self-scrolling label for timetable blocks too small for their text. The inner span is
+   sized to its content, so `100cqw - 100%` is exactly how far it overruns the block —
+   negative when it overflows, positive when it fits, and min() clamps the fitting case to
+   no movement at all. That means no JS measuring and no animation on labels that fit. */
+.tt-scroll {
+	overflow: hidden;
+	white-space: nowrap;
+	container-type: inline-size;
+}
+.tt-scroll > span {
+	display: inline-block;
+	width: max-content;
+	animation: nood-scroll-x 9s ease-in-out infinite alternate;
+}
+@keyframes nood-scroll-x {
+	from {
+		transform: translateX(0);
+	}
+	to {
+		transform: translateX(min(0px, calc(100cqw - 100%)));
+	}
 }
 
 @media (prefers-reduced-motion: reduce) {
